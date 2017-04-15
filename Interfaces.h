@@ -334,6 +334,7 @@ int SPI_WRITE(int Select, uint8_t * data, int nbytes)
 // ERROR ENUM
 enum i2c{
 	I2C_CLOCK_OOB = 51,
+	I2C_TIMEOUT,
 	I2C_START_ARB_LOST,
 	I2C_START_CRITICAL,
 	I2C_RESTART_ARB_LOST,
@@ -389,7 +390,10 @@ int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 	TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN);
 
 	// Wait for transmission
-	while (!(TWCR & (1<<TWINT)));
+	long counter = 0;
+	// TODO: Add timeout
+	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
+	if (counter == 1000000) return I2C_TIMEOUT;
 
 	// Check the status of the interface
 	switch (TW_STATUS)
@@ -422,7 +426,10 @@ int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 	TWCR = (1<<TWINT) | (1<<TWEN);
 
 	// Wait for transmission
-	while (!(TWCR & (1<<TWINT)));
+	counter = 0;
+	// TODO: Add timeout
+	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
+	if (counter == 1000000) return I2C_TIMEOUT;
 
 	//4. Check the status of the interface
 	switch (TW_STATUS)
@@ -458,8 +465,11 @@ int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 		//...and send
 		TWCR = (1<<TWINT) | (1<<TWEN);
 
-		//Wait for transmission
-		while (!(TWCR & (1<<TWINT)));
+		// Wait for transmission
+		counter = 0;
+		// TODO: Add timeout
+		while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter++; _delay_us(1);}
+		if (counter == 1000000) return I2C_TIMEOUT;
 
 		// Check the status of the interface
 		switch (TW_STATUS)
@@ -521,7 +531,10 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 	TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN);
 
 	// Wait for transmission
-	while (!(TWCR & (1<<TWINT)));
+	long counter = 0;
+	// TODO: Add timeout
+	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
+	if (counter == 1000000) return I2C_TIMEOUT;
 
 	// Check the status of the interface
 	switch (TW_STATUS)
@@ -554,7 +567,10 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 	TWCR = (1<<TWINT) | (1<<TWEN);
 
 	// Wait for transmission
-	while (!(TWCR & (1<<TWINT)));
+	counter = 0;
+	// TODO: Add timeout
+	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
+	if (counter == 1000000) return I2C_TIMEOUT;
 
 	//4. Check the status of the interface
 	switch (TW_STATUS)
@@ -587,8 +603,11 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 		if(II == read_len - 1) TWCR = (1<<TWINT) | (1<<TWEN); //Send NACK this time
 		else TWCR = (1<<TWINT) | (1<<TWEA) | (1<<TWEN);
 		
-		//Wait for transmission
-		while (!(TWCR & (1<<TWINT)));
+		// Wait for transmission
+		long counter = 0;
+		// TODO: Add timeout
+		while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
+		if (counter == 1000000) return I2C_TIMEOUT;
 		
 		switch (TW_STATUS)
 		{

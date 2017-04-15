@@ -493,7 +493,7 @@ int SEP_DEV_INIT(void)
 	return OK;
 } 
 int ReleaseMirror(long timeout_ms)
-{
+{	
 	// Set pin to 1
 	PORT_SD_TRIG |= (1<<SEP_DEV_TRIG);
 	
@@ -503,13 +503,17 @@ int ReleaseMirror(long timeout_ms)
 		_delay_us(1);
 		++counter;
 	}
-	if(counter == 1000*timeout_ms) return SEPARATION_DEV_TIMEOUT;
 	
+	// Set pin to 0
+	PORT_SD_TRIG &= ~(1<<SEP_DEV_TRIG);
+	
+	// Return
+	if(counter == 1000*timeout_ms) return SEPARATION_DEV_TIMEOUT;
 	return OK;
 }
 bool IsMirrorConstrained(void){
 	// TODO
-	return (PIN_SD_DET & (1<<SEP_DEV_DET));
+	return 1;// (PIN_SD_DET & (1<<SEP_DEV_DET));
 }
 
 /*--------------------------------------------------

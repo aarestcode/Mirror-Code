@@ -519,19 +519,19 @@ int main(void)
 
 	USART0_INIT(9600);
 	USART1_INIT(9600);
-    	SPI_INIT(4000000);
+    SPI_INIT(2000000);
 	I2C_INIT(200000);
 	
 	COMMUNICATION_INIT(1000);
 	POWER_INIT();
-    	PICOMOTORS_INIT();
-	//MULTIPLEXER_INIT(0);
-	//MULTIPLEXER_INIT(1);
+    PICOMOTORS_INIT();
+	MULTIPLEXER_INIT(0);
+	MULTIPLEXER_INIT(1);
 	SEP_DEV_INIT();
-	//TEMP_SENSORS_INIT();
+	TEMP_SENSORS_INIT();
 	
 	//PICOMOTOR_ESTIMATION_INIT(100);
-	//ELECTRODE_ACTUATION_INIT();
+	ELECTRODE_ACTUATION_INIT();
 	
 	int ch = 0;
 	int status;
@@ -555,7 +555,7 @@ int main(void)
 		if (++ch >= N_electrodes){
 			ch = 0;	
 		}
+			*/
 			
-			*/	
     }
 }

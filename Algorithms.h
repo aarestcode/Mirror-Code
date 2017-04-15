@@ -314,15 +314,19 @@ int ELECTRODE_ACTUATION_INIT(void)
 	int error = ActivateHV();
 	if(error) return error;
 	
+	uint16_t volt;
+	
 	// Initialize voltages for all electrodes (+ delays of 10ms)
 	int N_increments = floor((double)(0x3fff - REGISTER[memory_HV_BIAS])/(double)REGISTER[memory_HV_STEP]);
 	for(int II=0; II<N_increments; II++){
-		error = SetBias(0x3fff - II*REGISTER[memory_HV_STEP]);
+		volt = 0x3fff - II*REGISTER[memory_HV_STEP];
+		
+		error = SetBias(volt);
 		if(error) return error;
 		
-		// TODO: Delete next 3 lines
-		error = SetVoltage(0x3fff - II*REGISTER[memory_HV_STEP]);
+		error = SetVoltage(volt);
 		if(error) return error;
+		
 		_delay_ms(REGISTER[memory_HV_TIMER]);
 		
 		for (int ch=0; ch < N_electrodes; ch++){
@@ -334,9 +338,9 @@ int ELECTRODE_ACTUATION_INIT(void)
 	error = SetBias(REGISTER[memory_HV_BIAS]);
 	if(error) return error;
 	
-	// TODO: Delete next 3 lines
 	error = SetVoltage(REGISTER[memory_HV_BIAS]);
 	if(error) return error;
+	
 	_delay_ms(REGISTER[memory_HV_TIMER]);
 	
 	for (int ch=0; ch < N_electrodes; ch++){
