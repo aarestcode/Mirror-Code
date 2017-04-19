@@ -212,13 +212,7 @@ enum power_driver{
 int POWER_INIT(void){	
 	// Set tolerance on ADC feedback
 	REGISTER[memory_HV_TOL_V] = 31; // 0.1V tolerance over 3.3V max
-	
-	// Set step increment voltage
-	REGISTER[memory_HV_STEP] = 337; // 10V steps
-	
-	// Set bias voltage
-	REGISTER[memory_HV_BIAS] = 8191; // 8191 = +240V Bias
-	
+
 	// Set Supply voltage enable as output
 	DDR_SV |= ((1<<FIVE_V_E) | (1<<TWELVE_V_E) | (1<<TWO_EIGHT_V_E));
 	PORT_SV &= ~((1<<FIVE_V_E) | (1<<TWELVE_V_E) | (1<<TWO_EIGHT_V_E));

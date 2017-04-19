@@ -309,6 +309,12 @@ int ELECTRODE_ACTUATION_INIT(void)
 	
 	// Set maximum voltage
 	REGISTER[memory_ELECTRODE_LIMIT_V] = 8088; // Limit (plus/minus) from bias
+	
+	// Set step increment voltage
+	REGISTER[memory_HV_STEP] = 337; // 10V steps
+	
+	// Set bias voltage
+	REGISTER[memory_HV_BIAS] = 8191; // 8191 = +240V Bias
 		
 	// Turn on HV voltage
 	int error = ActivateHV();
