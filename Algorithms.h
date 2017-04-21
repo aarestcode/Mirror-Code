@@ -18,6 +18,13 @@
 #endif
 
 /*--------------------------------------------------
+                   OPERATION MODE
+--------------------------------------------------*/
+
+
+
+
+/*--------------------------------------------------
                 PICOMOTORS ESTIMATION
 --------------------------------------------------*/
 // PARAMETERS
@@ -314,7 +321,7 @@ int ELECTRODE_ACTUATION_INIT(void)
 	REGISTER[memory_HV_STEP] = 337; // 10V steps
 	
 	// Set bias voltage
-	REGISTER[memory_HV_BIAS] = 8191; // 8191 = +240V Bias
+	REGISTER[memory_HV_BIAS] = 10000; // 8191 = +240V Bias
 		
 	// Turn on HV voltage
 	int error = ActivateHV();
@@ -325,6 +332,7 @@ int ELECTRODE_ACTUATION_INIT(void)
 	// Initialize voltages for all electrodes (+ delays of 10ms)
 	int N_increments = floor((double)(0x3fff - REGISTER[memory_HV_BIAS])/(double)REGISTER[memory_HV_STEP]);
 	for(int II=0; II<N_increments; II++){
+		
 		volt = 0x3fff - II*REGISTER[memory_HV_STEP];
 		
 		error = SetBias(volt);
@@ -357,57 +365,7 @@ int ELECTRODE_ACTUATION_INIT(void)
 	
 	return OK;
 }
-int SortVoltages(unsigned int *voltages,unsigned int *sorted_voltages,unsigned int *sorted_channels, int number_channels)
-{
-	int II;
-	
-	unsigned int *temp_voltages = voltages;
-	int temp_channels[number_channels];
-	for(II = 0; II < number_channels; II++)
-	{
-		temp_channels[II] = II;
-	}
-	unsigned short volt;
-	short index;
-	short ch;
-	
-	// Sort voltages in ascending order and channels accordingly
-	for(II = 0; II < number_channels-1; II++)
-	{
-		volt = temp_voltages[II];
-		index = II;
-		for(int III = II+1; III < number_channels; III++)
-		{
-			if(temp_voltages[III] < volt)
-			{
-				volt = temp_voltages[III];
-				index = III;
-			}
-		}
-		temp_voltages[index] = temp_voltages[II];
-		temp_voltages[II] = volt;
-		ch = temp_channels[index];
-		temp_channels[index] = temp_channels[II];
-		temp_channels[II] = ch;
-	}
-
-	// Organize voltage in a triangle fashion
-	for(II = 0; II < number_channels; II+=2)
-	{
-		sorted_voltages[II/2] = temp_voltages[II];
-		sorted_channels[II/2] = temp_channels[II];
-	}
-	for(II = 1; II < number_channels; II+=2)
-	{
-		sorted_voltages[number_channels-(II+1)/2] = temp_voltages[II];
-		sorted_channels[number_channels-(II+1)/2] = temp_channels[II];
-	}
-	
-	
-	
-	return OK;
-}
-int ActuateElectode(int channel){
+int ActuateElectrode(int channel){
 	int status;
 	
 	unsigned int memory_address = memory_ELECTRODE1 + channel;

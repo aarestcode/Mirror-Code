@@ -399,7 +399,7 @@ int ParseCommand(int port)
 	
 	// ACTUATE ELECTRODE
 	else if (command==214){
-		int status = ActuateElectode(data);
+		int status = ActuateElectrode(data);
 		int error = SendFeedback(port,command,status);
 		if(error) return error;
 	}
@@ -525,13 +525,15 @@ int main(void)
 	COMMUNICATION_INIT(1000);
 	POWER_INIT();
     PICOMOTORS_INIT();
-	MULTIPLEXER_INIT(0);
-	MULTIPLEXER_INIT(1);
 	SEP_DEV_INIT();
 	TEMP_SENSORS_INIT();
 	
 	//PICOMOTOR_ESTIMATION_INIT(100);
 	ELECTRODE_ACTUATION_INIT();
+	
+	MULTIPLEXER_INIT(0);
+	MULTIPLEXER_INIT(1);
+	
 	
 	int ch = 0;
 	int status;
@@ -547,7 +549,7 @@ int main(void)
 		/*
 		// Actuate the electrode
 		if(REGISTER[memory_ELECTRODE1 + ch]){
-			status = ActuateElectode(ch);
+			status = ActuateElectrode(ch);
 			if(status) REGISTER[memory_ELECTRODE1 + ch] = 0; // If problem with electrode, turn it off
 		}
 		
