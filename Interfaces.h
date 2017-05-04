@@ -263,7 +263,8 @@ void USART1_FLUSH(void)
 
 // ERROR ENUM
 enum spi{
-	SPI_CLOCK_OOB = 41
+	SPI_CLOCK_OOB = 41,
+	SPI_TIMEOUT
 	};
 
 // FUNCTIONS
@@ -313,7 +314,9 @@ int SPI_WRITE(int Select, uint8_t * data, int nbytes)
 		/* Start transmission */
 		SPDR = data[II];
 		/* Wait for transmission complete */
-		while(!(SPSR & (1<<SPIF)));
+		long counter = 0;
+		while((!(SPSR & (1<<SPIF)))  && (counter < 1000000)) {counter ++; _delay_us(1);}
+		if (counter == 1000000) return SPI_TIMEOUT;
 	}
 
 	// End the transmission. Put SS line high
@@ -391,7 +394,6 @@ int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 
 	// Wait for transmission
 	long counter = 0;
-	// TODO: Add timeout
 	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
 	if (counter == 1000000) return I2C_TIMEOUT;
 
@@ -658,7 +660,8 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 enum adc{
 	ADC_CLOCK_LOW = 71,
 	ADC_CLOCK_HIGH,
-	ADC_CLOCK_OOB
+	ADC_CLOCK_OOB,
+	ADC_TIMEOUT
 	};
 
 // FUNCTIONS
@@ -693,10 +696,12 @@ int ADC_READ(int line, int* data)
 	ADCSRA |= (1<<ADSC);
 	
 	// Wait for conversion to be done
-	while(ADCSRA & (1<<ADIF));
+	long counter = 0;
+	while((ADCSRA & (1<<ADIF)) && (counter < 1000000)) {counter ++; _delay_us(1);}
+	if (counter == 1000000) return ADC_TIMEOUT;
 	
 	// Extract data
-	*data = ADCL;
+	*data = (long)ADCL;
 	*data |= (ADCH<<8);
 	
 	REGISTER[memory_ADC_RX] = (REGISTER[memory_ADC_RX] << 16) | (*data);

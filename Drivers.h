@@ -26,7 +26,7 @@
 // PARAMETERS
 #define MessageCommandN 1 //Length of command in byte
 #define MessageDataN 4 // Length of data
-#define MessageChecksumN 0 // length of checksum
+#define MessageChecksumN 1 // length of checksum
 #define MessageN MessageCommandN+MessageDataN+MessageChecksumN // Command(1) + Data(4) + Checksum(1)
 unsigned char Message[MessageN]; //Vector of received bytes
 unsigned char Feedback[MessageN]; //Vector of transmitted bytes
@@ -672,7 +672,7 @@ int GetEncoderState(int index, int* state)
 const char MPaddr[2] = {0x98,0x84}; // Multiplexer I2C addresses (connected to SCL, SDA, V+). LSB is irrelevant (7-bit address in bit 7 to bit 1)
 	
 // ADRESSES OF SWITCHES
-const bool MPIC[42] = {1,1,0,0,0,0,1,0,0,1,1,0,1,1,0,1,0,0,0,0,1,0,1,0,1,0,0,0,0,1,0,1,0,0,1,0,1,0,1,0,1,1}; // I/O expander
+const bool MPIC[42] =   {   1,   1,   0,   0,   0,   0,   1,   0,   0,   1,   1,   0,   1,   1,   0,   1,   0,   0,   0,   0,   1,   0,   1,   0,   1,   0,   0,   0,   0,   1,   0,   1,   0,   0,   1,   0,   1,   0,   1,   0,   1,   1}; // I/O expander
 const char MPport[42] = {0x3F,0x3E,0x28,0x3E,0x39,0x38,0x34,0x2D,0x2F,0x39,0x3D,0x3C,0x30,0x2D,0x24,0x3A,0x2A,0x29,0x30,0x3D,0x2F,0x26,0x31,0x33,0x38,0x2E,0x2B,0x3A,0x25,0x33,0x3B,0x37,0x2C,0x31,0x3B,0x27,0x2E,0x3F,0x2C,0x32,0x3C,0x32};
 	
 // FUNCTIONS

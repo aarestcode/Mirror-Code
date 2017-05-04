@@ -20,7 +20,36 @@
 /*--------------------------------------------------
                    OPERATION MODE
 --------------------------------------------------*/
+#define IDLE_MODE 0
+#define SAFE_MODE 1
+#define RELEASE_MIRROR_MODE 2
+#define ELECTRODE_ACTUATION_MODE 3
+#define PICO_FEEDBACK_ACTUATION_MODE 4
+#define PICO_OPEN_LOOP_ACTUATION_MODE 5
 
+int SetMode(int mode){
+	if (mode==SAFE_MODE){
+		
+	}
+	else if (mode==IDLE_MODE){
+		
+	}
+	else if (mode==RELEASE_MIRROR_MODE){
+		
+	}
+	else if (mode==ELECTRODE_ACTUATION_MODE){
+		
+	}
+	else if (mode==PICO_FEEDBACK_ACTUATION_MODE){
+		
+	}
+	else if (mode==PICO_OPEN_LOOP_ACTUATION_MODE){
+		
+	}
+	else return 200;
+	
+	return OK;
+}
 
 
 
@@ -307,12 +336,12 @@ int SetPicomotorLocation(int index, int currentLocation, int desiredLocation)
                 ELECTRODE ACTUATION
 --------------------------------------------------*/
 #define N_electrodes 41 //Number of electrodes
-int ActuateElectode(int channel);
+int ActuateElectrode(int channel);
 
 int ELECTRODE_ACTUATION_INIT(void)
 {
 	// Set times
-	REGISTER[memory_HV_TIMER] = 1000; // Time for HV to stabilize [ms]
+	REGISTER[memory_HV_TIMER] = 10; // Time for HV to stabilize [ms]
 	
 	// Set maximum voltage
 	REGISTER[memory_ELECTRODE_LIMIT_V] = 8088; // Limit (plus/minus) from bias
@@ -321,13 +350,13 @@ int ELECTRODE_ACTUATION_INIT(void)
 	REGISTER[memory_HV_STEP] = 337; // 10V steps
 	
 	// Set bias voltage
-	REGISTER[memory_HV_BIAS] = 10000; // 8191 = +240V Bias
+	REGISTER[memory_HV_BIAS] = 14000; // 8191 = +240V Bias
 		
 	// Turn on HV voltage
 	int error = ActivateHV();
 	if(error) return error;
 	
-	uint16_t volt;
+	long volt;
 	
 	// Initialize voltages for all electrodes (+ delays of 10ms)
 	int N_increments = floor((double)(0x3fff - REGISTER[memory_HV_BIAS])/(double)REGISTER[memory_HV_STEP]);
@@ -344,9 +373,9 @@ int ELECTRODE_ACTUATION_INIT(void)
 		_delay_ms(REGISTER[memory_HV_TIMER]);
 		
 		for (int ch=0; ch < N_electrodes; ch++){
-			REGISTER[memory_ELECTRODE1+ch] = ((long)10<<24) | ((long)10<<16) | ((0x3fff - II*REGISTER[memory_HV_STEP]) & 0xffff);
-			//error = ActuateElectode(ch);
-			//if(error) return error;
+			REGISTER[memory_ELECTRODE1+ch] = ((long)10<<24) | ((long)10<<16) | (volt & 0xffff);
+			error = ActuateElectrode(ch); // Should go very quickly since the voltage is already set
+			if(error) return error;
 		}
 	}
 	error = SetBias(REGISTER[memory_HV_BIAS]);
@@ -359,8 +388,8 @@ int ELECTRODE_ACTUATION_INIT(void)
 	
 	for (int ch=0; ch < N_electrodes; ch++){
 		REGISTER[memory_ELECTRODE1+ch] = ((long)10<<24) | ((long)10<<16) | (REGISTER[memory_HV_BIAS] & 0xffff);
-		//error = ActuateElectode(ch);
-		//if(error) return error;
+		error = ActuateElectrode(ch); // Should go very quickly since the voltage is already set
+		if(error) return error;
 	}
 	
 	return OK;

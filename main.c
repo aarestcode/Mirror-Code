@@ -1,5 +1,5 @@
 /*
- * FLIGHT_RM_V1.c
+ * FLIGHT_RM_V2.c
  *
  * Created: 6/14/2016 2:48:57 PM
  * Author : Thibaud
@@ -35,7 +35,7 @@ int ParseCommand(int port)
 		
 		if(checksum != mask)
 		{
-			int error = SendFeedback(port,'C',checksum);
+			int error = SendFeedback(port,253,checksum);
 			if(error) return error;
 		}
 
@@ -521,6 +521,7 @@ int main(void)
 	USART1_INIT(9600);
     SPI_INIT(2000000);
 	I2C_INIT(200000);
+	ADC_INIT(100000);
 	
 	COMMUNICATION_INIT(1000);
 	POWER_INIT();
@@ -541,12 +542,15 @@ int main(void)
 	
     while (1)
     {	
+		
+		_delay_ms(100);
 		// Receive telecommand (if any)	
-		if((port=IsCommandWaiting())){
+		if(IsCommandWaiting()){
+				port=IsCommandWaiting();
 				status = SaveCommand(port);
 				if(status == 0) ParseCommand(port);
 		}
-		/*
+		
 		// Actuate the electrode
 		if(REGISTER[memory_ELECTRODE1 + ch]){
 			status = ActuateElectrode(ch);
@@ -554,10 +558,7 @@ int main(void)
 		}
 		
 		// Update electrode index
-		if (++ch >= N_electrodes){
-			ch = 0;	
-		}
-			*/
+		if (++ch >= N_electrodes) ch = 0;				
 			
     }
 }
