@@ -3,6 +3,8 @@
  *
  * Created: 6/14/2016 2:48:57 PM
  * Author : Thibaud
+ * Note on May 2017: this is the original version, dated back to 2016. Latest version should check the algorithm branch.
+ *
  */ 
 
 #define F_CPU 8000000UL // CPU Frequency (IMPORTANT)
