@@ -2,8 +2,8 @@
  * ScheduluerTestDec16.c
  *
  *	Contains core part of scheduler
- *  Definition of task prototype
- *
+ *  	Definition of task prototype
+ *	Note (May 2017): this version of scheduler has been abandoned.
  * Created: 12/23/2016 2:27:30 PM
  * Author : WYC
  */ 
