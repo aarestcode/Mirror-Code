@@ -91,7 +91,7 @@ enum memory_enum
 	memory_MUX_ACTIVE_CH,         // R       //NOT IMPLEMENTED
 	
 	memory_TEMP_MCP9801_1,		  // R
-	memory_TEMP_MCP9801_2,		  // R
+	memory_TEMP_PCT2075_1,		  // R
 	memory_TEMP_TMP006_1,         // R
 	memory_TEMP_TMP006_2,         // R
 	memory_TEMP_TMP006_3,         // R

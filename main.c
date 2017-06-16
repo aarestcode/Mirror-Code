@@ -526,15 +526,13 @@ int main(void)
 	COMMUNICATION_INIT(1000);
 	POWER_INIT();
     PICOMOTORS_INIT();
+	MULTIPLEXER_INIT(0);
+	MULTIPLEXER_INIT(1);
 	SEP_DEV_INIT();
 	TEMP_SENSORS_INIT();
 	
-	//PICOMOTOR_ESTIMATION_INIT(100);
-	ELECTRODE_ACTUATION_INIT();
-	
-	MULTIPLEXER_INIT(0);
-	MULTIPLEXER_INIT(1);
-	
+	PICOMOTOR_ESTIMATION_INIT(100);
+	//ELECTRODE_ACTUATION_INIT();
 	
 	int ch = 0;
 	int status;
@@ -542,15 +540,13 @@ int main(void)
 	
     while (1)
     {	
-		
-		_delay_ms(100);
 		// Receive telecommand (if any)	
 		if(IsCommandWaiting()){
 				port=IsCommandWaiting();
 				status = SaveCommand(port);
 				if(status == 0) ParseCommand(port);
 		}
-		
+		/*
 		// Actuate the electrode
 		if(REGISTER[memory_ELECTRODE1 + ch]){
 			status = ActuateElectrode(ch);
@@ -559,6 +555,6 @@ int main(void)
 		
 		// Update electrode index
 		if (++ch >= N_electrodes) ch = 0;				
-			
+			*/
     }
 }

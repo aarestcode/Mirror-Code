@@ -269,8 +269,9 @@ int ActivateHV(void)
 	if(error) return error;
 	
 	// 6) Check HV_VOLTAGE at 2.5V
-	/*int val;
-	error = MeasureV(HV_VOLTAGE,&val);
+	/*_delay_ms(1500);
+	int val;
+	error = MeasureV(PICOMOTOR_VOLTAGE,&val);
 	if(error) return error;
 	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
 		// Disable CL3
@@ -294,7 +295,8 @@ int ActivateHV(void)
 	if(error) return error;
 	
 	// 9) Check HV_GROUND at 2.5V
-	/*error = MeasureV(HV_GROUND,&val);
+	/*_delay_ms(1500);
+	error = MeasureV(PICOMOTOR_VOLTAGE,&val);
 	if(error) return error;
 	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
 		// Disable CL2
@@ -353,8 +355,9 @@ int ActivatePICOV(bool withEncoders){
 	error = EnableCL(CL1_E,true);
 	if(error) return error;
 	
-	// 3) Check PICOMOTOR_VOLTAGE at 2.5V
-	/*int val;
+	// 3) Check PICOMOTOR_VOLTAGE at 2.5V !!! TAKES ABOUT 1.5 sec TO STABILIZE !!!
+	_delay_ms(1500);
+	int val;
 	error = MeasureV(PICOMOTOR_VOLTAGE,&val);
 	if(error) return error;
 	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
@@ -363,7 +366,7 @@ int ActivatePICOV(bool withEncoders){
 		if(error) return error;
 		
 		return PICOMOTOR_FEEDBACK_OOB;
-	}*/
+	}
 		
 	// 4) Check CL1
 	/*if(IsCLFault(1)){
@@ -513,7 +516,6 @@ bool IsMirrorConstrained(void){
 /*--------------------------------------------------
                   PICOMOTORS/ENCODERS
 --------------------------------------------------*/
-//TODO: Modify with I2C expander
 // MCP23S17
 const int IOEaddr = 0x40; // Address of the IO Expander (LSB = 0 for WRITE operations)
 const int IOEport[3] = {0x12,0x13,0x13}; // Address of the port to which each picomotor is connected (pico1, pico2, pico3)
@@ -732,7 +734,9 @@ int ChannelOff(int ch)
 --------------------------------------------------*/
 // ADDRESSES OF SENSORS
 const uint8_t MCP9801addr[1] = {0x9E}; // const uint8_t MCP9801addr[2] = {0x9E, 0x92}; 
-const uint8_t TMP006addr[0] = {}; //const uint8_t TMP006addr[3] = {0x80, 0x82, 0x88};
+const uint8_t PCT2075addr[0] = {}; // const uint8_t PCT2075addr[2] = {0x9E, 0x90}; 
+const uint8_t TMP006addr[0] = {}; //const uint8_t TMP006addr[3] = {0x80, 0x82, 0x8A};
+
 	
 // PARAMETERS
 const float S0[1] = {1.0}; // TODO: Calibrate S0
@@ -746,9 +750,17 @@ enum temp_sensors{
 int TEMP_SENSORS_INIT(void){
 	int status;
 	
-	// MCP9801 (9-bit precision)
+	// MCP9801 (12-bit precision)
 	for(int II=0; II < (sizeof(MCP9801addr)/sizeof(uint8_t)); II++){
-		status = I2C_WRITE(MCP9801addr[II], (uint8_t [2]){0x01, 0}, 2);
+		status = I2C_WRITE(MCP9801addr[II], (uint8_t [2]){0x01, 0b01100000}, 2);
+		if(status) return status;
+	}
+	
+	// PCT2075
+	for(int II=0; II < (sizeof(PCT2075addr)/sizeof(uint8_t)); II++){
+		status = I2C_WRITE(PCT2075addr[II], (uint8_t [2]){0x01, 0b00000000}, 2); // Normal reading mode
+		if(status) return status;
+		status = I2C_WRITE(PCT2075addr[II], (uint8_t [2]){0x04, 0b00000001}, 2); // Period to measure temperature = 100 ms
 		if(status) return status;
 	}
 	
@@ -776,6 +788,23 @@ int GetTemperatureMCP9801(int sensor_index, int16_t * temperature_128){
 	
 	REGISTER[memory_TEMP_MCP9801_1+sensor_index] = ((int16_t)(1-2*sign))*temp_128_abs;
 	*temperature_128 = ((int16_t)(1-2*sign))*temp_128_abs;
+	
+	return OK;
+}
+int GetTemperaturePCT2075(int sensor_index, int16_t * temperature_128){	
+	
+	// Check index
+	if(sensor_index >= (sizeof(PCT2075addr)/sizeof(uint8_t))) return SENSOR_INDEX_OOB;
+	
+	uint8_t read_data[2];
+	
+	int status = I2C_READ(MCP9801addr[sensor_index], (uint8_t [1]){0}, 1, read_data, 2);
+	if(status) return status;
+	
+	int16_t temp_256 = (read_data[0] << 8) + read_data[1];
+	
+	REGISTER[memory_TEMP_PCT2075_1+sensor_index] = temp_256/2;
+	*temperature_128 = temp_256/2;
 	
 	return OK;
 }

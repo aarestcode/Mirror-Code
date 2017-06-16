@@ -702,7 +702,7 @@ int ADC_READ(int line, int* data)
 	
 	// Extract data
 	*data = (long)ADCL;
-	*data |= (ADCH<<8);
+	*data |= (ADCH<<8);	
 	
 	REGISTER[memory_ADC_RX] = (REGISTER[memory_ADC_RX] << 16) | (*data);
 	
