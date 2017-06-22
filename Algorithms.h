@@ -16,43 +16,6 @@
 #ifndef OK
 #define OK 0
 #endif
-
-/*--------------------------------------------------
-                   OPERATION MODE
---------------------------------------------------*/
-#define IDLE_MODE 0
-#define SAFE_MODE 1
-#define RELEASE_MIRROR_MODE 2
-#define ELECTRODE_ACTUATION_MODE 3
-#define PICO_FEEDBACK_ACTUATION_MODE 4
-#define PICO_OPEN_LOOP_ACTUATION_MODE 5
-
-int SetMode(int mode){
-	if (mode==SAFE_MODE){
-		
-	}
-	else if (mode==IDLE_MODE){
-		
-	}
-	else if (mode==RELEASE_MIRROR_MODE){
-		
-	}
-	else if (mode==ELECTRODE_ACTUATION_MODE){
-		
-	}
-	else if (mode==PICO_FEEDBACK_ACTUATION_MODE){
-		
-	}
-	else if (mode==PICO_OPEN_LOOP_ACTUATION_MODE){
-		
-	}
-	else return 200;
-	
-	return OK;
-}
-
-
-
 /*--------------------------------------------------
                 PICOMOTORS ESTIMATION
 --------------------------------------------------*/
@@ -350,7 +313,7 @@ int ELECTRODE_ACTUATION_INIT(void)
 	REGISTER[memory_HV_STEP] = 337; // 10V steps
 	
 	// Set bias voltage
-	REGISTER[memory_HV_BIAS] = 14000; // 8191 = +240V Bias
+	REGISTER[memory_HV_BIAS] = 8191; // 8191 = +240V Bias
 		
 	// Turn on HV voltage
 	int error = ActivateHV();

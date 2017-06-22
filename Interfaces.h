@@ -30,6 +30,7 @@ These functions are "independent" of the hardware (except for the pinsets and th
 #include <util/twi.h> // For I2C interface
 #include <stdio.h> // To use printf
 #include <stdbool.h>
+#include <string.h>
 #include <avr/interrupt.h> // Interrupt use to receive data from UART
 
 /*--------------------------------------------------
@@ -55,21 +56,19 @@ void BlinkLED(void){
 // PORTD0 = RX
 // PORTD1 = TX
 
+// PARAMETERS
+unsigned char USART0_buffer[256];
+int USART0_buffer_index;
+
 // PROTOTYPES
 int USART0_INIT(unsigned long USART_BAUDRATE);
-int USART0_PRINTF(char var, FILE *stream);
 int USART0_WRITE(char var);
-bool USART0_FLAG(void);
-int USART0_READ(char* var, long timeout_ms);
+int USART0_READ(char* var);
 void USART0_FLUSH(void);
-
-// FILE STREAMS
-static FILE mystdout0 = FDEV_SETUP_STREAM(USART0_PRINTF, NULL, _FDEV_SETUP_WRITE); // NOTE: USE printf TO SEND DATA
 
 // ERROR ENUM
 enum uart0{
-	UART0_TIMEOUT = 21,
-	UART0_INCORRECT_STOP,
+	UART0_INCORRECT_STOP = 21,
 	UART0_FRAME_LOST,
 	UART0_PARITY_CHECK
 	};
@@ -77,9 +76,6 @@ enum uart0{
 // FUNCTIONS
 int USART0_INIT(unsigned long USART_BAUDRATE)
 {
-	// TODO: Delete that line (this is just for simple testing)
-	stdout = &mystdout0; // To use printf     for output
-
 	REGISTER[memory_USART0_BAUD] = USART_BAUDRATE;
 	unsigned int UBRR_VALUE = (((F_CPU / (USART_BAUDRATE * 16UL))) - 1);
 
@@ -88,50 +84,31 @@ int USART0_INIT(unsigned long USART_BAUDRATE)
 	UBRR0L = (uint8_t)(UBRR_VALUE);
 	
 	// Enable receiver, transmitter and RX complete interrupt
-	UCSR0B = (1<<RXEN0) | (1<<TXEN0);// | (1<<RXCIE0);
+	UCSR0B = (1<<RXEN0) | (1<<TXEN0) | (1<<RXCIE0);
 	
 	// Set frame format: 8data, 1stop bit, parity mode disabled
 	UCSR0C = (1<<USBS0) | (3<<UCSZ00);
 	
 	// Flush the receive buffer
 	USART0_FLUSH();
-	
-	return OK;
-}
-int USART0_PRINTF(char var, FILE *stream)
-{
-	// TODO: Delete that function (this is just for simple testing)
-	// Wait for empty transmit buffer
-	while ( !(UCSR0A & (1<<UDRE0)) );
-	// Start transmission
-	UDR0 = var;
-	
+		
 	return OK;
 }
 int USART0_WRITE(char var)
-{
+{	
 	// Wait for empty transmit buffer
-	while ( !(UCSR0A & (1<<UDRE0)) );
+	while ( !(UCSR0A & (1<<UDRE0)))
+	
 	// Start transmission
-
 	REGISTER[memory_USART0_TX] = (REGISTER[memory_USART0_TX]<<8) | var;
 	UDR0 = var;
 	
 	return OK;
 }
-bool USART0_FLAG(void)
-{
-	return (UCSR0A & (1<<RXC0));
-}
-int USART0_READ(char* var, long timeout_ms)
+int USART0_READ(char* var)
 {
 	// Wait for incoming data
-	uint32_t counter = 0;
-	while ( !(UCSR0A & (1<<RXC0)) && (counter < 1000*timeout_ms)){
-		 _delay_us(1);
-		 ++counter;
-	}
-	if(counter == 1000*timeout_ms) return UART0_TIMEOUT;
+	while ( !(UCSR0A & (1<<RXC0)) );
 	
 	// Incorrect stop error
 	if(UCSR0A & (1<<FE0)) return UART0_INCORRECT_STOP;
@@ -149,6 +126,15 @@ void USART0_FLUSH(void)
 {
 	unsigned char dummy;
 	while ( UCSR0A & (1<<RXC0) ) dummy = UDR0;
+	dummy++; // Because I'm tired of the compiler warning me it's not used
+	
+	// Set buffer
+	memset(USART0_buffer, 0, sizeof(USART0_buffer));
+	USART0_buffer_index = 0;
+}
+ISR(USART0_RX_vect){
+	USART0_READ((char*) &USART0_buffer[USART0_buffer_index++]);
+	USART0_buffer_index %= 256;
 }
 
 /*--------------------------------------------------
@@ -158,17 +144,19 @@ void USART0_FLUSH(void)
 // PORTD2 = RX
 // PORTD3 = TX
 
+// PARAMETERS
+unsigned char USART1_buffer[256];
+int USART1_buffer_index;
+
 // PROTOTYPES
 int USART1_INIT(unsigned long USART_BAUDRATE);
 int USART1_WRITE(char var);
-bool USART1_FLAG(void);
-int USART1_READ(char* var, long timeout_ms);
+int USART1_READ(char* var);
 void USART1_FLUSH(void);
 
 // ERROR ENUM
 enum uart1{
-	UART1_TIMEOUT = 31,
-	UART1_INCORRECT_STOP,
+	UART1_INCORRECT_STOP = 31,
 	UART1_FRAME_LOST,
 	UART1_PARITY_CHECK
 	};
@@ -184,7 +172,7 @@ int USART1_INIT(unsigned long USART_BAUDRATE)
 	UBRR1L = (uint8_t)(UBRR_VALUE);
 	
 	// Enable receiver, transmitter and RX complete interrupt
-	UCSR1B = (1<<RXEN1) | (1<<TXEN1);// | (1<<RXCIE0);
+	UCSR1B = (1<<RXEN1) | (1<<TXEN1) | (1<<RXCIE1);
 	
 	// Set frame format: 8data, 1stop bit, parity mode disabled
 	UCSR1C = (1<<USBS1) | (3<<UCSZ10);
@@ -197,27 +185,18 @@ int USART1_INIT(unsigned long USART_BAUDRATE)
 int USART1_WRITE(char var)
 {
 	// Wait for empty transmit buffer
-	while ( !(UCSR1A & (1<<UDRE1)) );
+	while ( !(UCSR1A & (1<<UDRE1)));
+	
 	// Start transmission
-
 	REGISTER[memory_USART1_TX] = (REGISTER[memory_USART1_TX]<<8) | var;
 	UDR1 = var;
 	
 	return OK;
 }
-bool USART1_FLAG(void)
-{
-	return (UCSR1A & (1<<RXC1));
-}
-int USART1_READ(char* var, long timeout_ms)
+int USART1_READ(char* var)
 {
 	// Wait for incoming data
-	uint32_t counter = 0;
-	while ( !(UCSR1A & (1<<RXC1)) && (counter < 1000*timeout_ms)){
-		_delay_us(1);
-		++counter;
-	}
-	if(counter == 1000*timeout_ms) return UART1_TIMEOUT;
+	while ( !(UCSR1A & (1<<RXC1)));
 	
 	// Incorrect stop error
 	if(UCSR1A & (1<<FE1)) return UART1_INCORRECT_STOP;
@@ -235,8 +214,16 @@ void USART1_FLUSH(void)
 {
 	unsigned char dummy;
 	while ( UCSR1A & (1<<RXC1) ) dummy = UDR1;
+	dummy++; // Because I'm tired of the compiler warning me it's not used
+	
+	// Set buffer
+	memset(USART1_buffer, 0, sizeof(USART1_buffer));
+	USART1_buffer_index = 0;
 }
-
+ISR(USART1_RX_vect){
+	USART1_READ((char*) &USART1_buffer[USART1_buffer_index++]);
+	USART1_buffer_index %= 256;
+}
 
 /*--------------------------------------------------
                    SPI INTERFACE
@@ -301,6 +288,9 @@ int SPI_INIT(unsigned long F_SPI)
 }
 int SPI_WRITE(int Select, uint8_t * data, int nbytes)
 {
+	// Disable interrupts
+	cli();
+	
 	// Begin the transmission. Adjust phase (CPHA=0 for PICO, CPHA=1 for HV). Put SS line low
 	if(Select==SELECT_PICO) {SPCR &= ~(1<<CPHA); PORT_SS_PICO &= ~(1<<SS_PICO);} //PICO
 	if(Select==SELECT_HV) {SPCR |= (1<<CPHA); PORT_SS_HV &= ~(1<<SS_HV);} //HV
@@ -316,13 +306,21 @@ int SPI_WRITE(int Select, uint8_t * data, int nbytes)
 		/* Wait for transmission complete */
 		long counter = 0;
 		while((!(SPSR & (1<<SPIF)))  && (counter < 1000000)) {counter ++; _delay_us(1);}
-		if (counter == 1000000) return SPI_TIMEOUT;
+		if (counter == 1000000){
+			// Enable interrupts
+			sei();
+			
+			return SPI_TIMEOUT;
+		}
 	}
 
 	// End the transmission. Put SS line high
 	PORT_SS_PICO |= (1<<SS_PICO);
 	PORT_SS_HV |= (1<<SS_HV);
 	PORT_SS_BIAS |= (1<<SS_BIAS);
+
+	// Enable interrupts
+	sei();
 
 	return OK;
 }
@@ -368,23 +366,20 @@ int I2C_INIT(unsigned long F_I2C)
 }
 int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 {
+	// Disable interrupts
+	cli();
+	
 	//-------------------------------------------------------------------------------
 	//                          Initialization
-	//-------------------------------------------------------------------------------
-	// If no data to be sent, exit
-	if(len==0) return OK;
-	
-	// Make sure SLA is appropriate to do a "write" operation (LSB = 0)
-	SLA &= 0xFE;
-
+	//-------------------------------------------------------------------------------	
 	// Status to be returned
 	int status = OK;
 
 	// Number of tries
-	int n = 1;
+	REGISTER[memory_I2C_ITER] = 0;
 
 	restart:
-	if (n++ > REGISTER[memory_I2C_MAX_ITER]) {goto quit;} //The device does not respond after MAX_ITER tries
+	if (++REGISTER[memory_I2C_ITER] > REGISTER[memory_I2C_MAX_ITER]) {goto quit;} //The device does not respond after MAX_ITER tries
 
 	//-------------------------------------------------------------------------------
 	//                                   Send START
@@ -395,7 +390,12 @@ int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 	// Wait for transmission
 	long counter = 0;
 	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
-	if (counter == 1000000) return I2C_TIMEOUT;
+	if (counter == 1000000) {
+		// Enable interrupts
+		sei();
+			 
+		return I2C_TIMEOUT;
+	}
 
 	// Check the status of the interface
 	switch (TW_STATUS)
@@ -412,6 +412,8 @@ int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 		
 		// Error. Should never happen. Do not send stop.
 		default:
+		// Enable interrupts
+		sei();
 		return I2C_START_CRITICAL;
 	}
 
@@ -419,19 +421,18 @@ int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 	//                                Send Device Address
 	//-------------------------------------------------------------------------------
 	// Save address in Register
-	REGISTER[memory_I2C_SLA] = SLA;
+	REGISTER[memory_I2C_SLA] = (uint32_t)(REGISTER[memory_I2C_SLA] << 8) | (SLA & 0xFE);
 	
 	// Load SLA+W into TWDR Register...
-	TWDR = SLA;
+	TWDR = SLA & 0xFE;
 
 	//...and send
 	TWCR = (1<<TWINT) | (1<<TWEN);
 
 	// Wait for transmission
 	counter = 0;
-	// TODO: Add timeout
 	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
-	if (counter == 1000000) return I2C_TIMEOUT;
+	if (counter == 1000000) {status = I2C_TIMEOUT; goto quit;};
 
 	//4. Check the status of the interface
 	switch (TW_STATUS)
@@ -469,9 +470,8 @@ int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 
 		// Wait for transmission
 		counter = 0;
-		// TODO: Add timeout
 		while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter++; _delay_us(1);}
-		if (counter == 1000000) return I2C_TIMEOUT;
+		if (counter == 1000000) {status = I2C_TIMEOUT; goto quit;}
 
 		// Check the status of the interface
 		switch (TW_STATUS)
@@ -502,11 +502,17 @@ int I2C_WRITE(uint8_t SLA, uint8_t * data, int len)
 	quit:
 	//7. Transmit STOP condition
 	TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO);
+	
+	// Enable interrupts
+	sei();
 
 	return status;
 }
 int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_read, int read_len)
 {
+	// Disable interrupts
+	cli();
+	
 	//-------------------------------------------------------------------------------
 	//                                0. Initialization
 	//-------------------------------------------------------------------------------
@@ -514,29 +520,137 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 	int status = OK;
 	
 	// Number of tries
-	int n = 1;
+	REGISTER[memory_I2C_ITER] = 0;
 
 	restart:
-	if (n++ > REGISTER[memory_I2C_MAX_ITER]) {goto quit;} //The device does not respond after MAX_ITER tries
+	if (++REGISTER[memory_I2C_ITER] > REGISTER[memory_I2C_MAX_ITER]) {goto quit;} //The device does not respond after MAX_ITER tries
 		
 	//-------------------------------------------------------------------------------
-	//                               1. Send write command
-	//-------------------------------------------------------------------------------
-	status = I2C_WRITE(SLA, data_write, write_len);
-	if(status) return status;
-	
-
-	//-------------------------------------------------------------------------------
-	//                               2. Send RESTART
+	//                                  1. Send START
 	//-------------------------------------------------------------------------------
 	// Send start
 	TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN);
 
 	// Wait for transmission
 	long counter = 0;
-	// TODO: Add timeout
 	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
-	if (counter == 1000000) return I2C_TIMEOUT;
+	if (counter == 1000000) {
+		// Enable interrupts
+		sei();
+		
+		return I2C_TIMEOUT;
+	}
+
+	// Check the status of the interface
+	switch (TW_STATUS)
+	{
+		// Normal behavior
+		case TW_REP_START:
+		case TW_START:
+		break;
+		
+		// Lost arbitration. Should never happen
+		case TW_MT_ARB_LOST:
+		status = I2C_START_ARB_LOST;
+		goto restart;
+		
+		// Error. Should never happen. Do not send stop.
+		default:
+		// Enable interrupts
+		sei();
+		return I2C_START_CRITICAL;
+	}
+
+	//-------------------------------------------------------------------------------
+	//                         2. Send Device Address + Write (0)
+	//-------------------------------------------------------------------------------
+	// Save address in Register
+	REGISTER[memory_I2C_SLA] = (uint32_t)(REGISTER[memory_I2C_SLA] << 8) | (SLA & 0xFE);
+	
+	// Load SLA+W into TWDR Register...
+	TWDR = SLA & 0xFE;
+
+	//...and send
+	TWCR = (1<<TWINT) | (1<<TWEN);
+
+	// Wait for transmission
+	counter = 0;
+	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
+	if (counter == 1000000) {status = I2C_TIMEOUT; goto quit;};
+
+	//4. Check the status of the interface
+	switch (TW_STATUS)
+	{
+		// Normal behavior. Address acknowledged
+		case TW_MT_SLA_ACK:
+		break;
+		
+		// Not acknowledged. Device busy. Restart.
+		case TW_MT_SLA_NACK:
+		status = I2C_ADDR_NACK;
+		goto restart;
+		// Lost arbitration. Should never happen
+		case TW_MT_ARB_LOST:
+		status = I2C_ADDR_ARB_LOST;
+		goto restart;
+		
+		// Error.
+		default:
+		status = I2C_ADDR_CRITICAL;
+		goto quit;
+	}
+
+	//-------------------------------------------------------------------------------
+	//                                3. Send Write Data
+	//-------------------------------------------------------------------------------
+	for (int II=0; II<write_len; II++){
+		// Save data in Register
+		REGISTER[memory_I2C_TX] = (REGISTER[memory_I2C_TX]<<8) | data_write[II];
+		
+		// Load data into TWDR Register... (and increment)
+		TWDR = data_write[II];
+		//...and send
+		TWCR = (1<<TWINT) | (1<<TWEN);
+
+		// Wait for transmission
+		counter = 0;
+		while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter++; _delay_us(1);}
+		if (counter == 1000000) {status = I2C_TIMEOUT; goto quit;}
+
+		// Check the status of the interface
+		switch (TW_STATUS)
+		{
+			// Normal behavior. Data acknowledged
+			case TW_MT_DATA_ACK:
+			break;
+			
+			// Not acknowledged. Device busy. Restart.
+			case TW_MT_DATA_NACK:
+			status = I2C_DATA_NACK;
+			goto restart;
+			// Lost arbitration. Should never happen
+			case TW_MT_ARB_LOST:
+			status = I2C_DATA_ARB_LOST;
+			goto restart;
+			
+			// Error.
+			default:
+			status = I2C_DATA_CRITICAL;
+			goto quit;
+		}
+	}
+	
+
+	//-------------------------------------------------------------------------------
+	//                                 4. Send RESTART
+	//-------------------------------------------------------------------------------
+	// Send start
+	TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN);
+
+	// Wait for transmission
+	counter = 0;
+	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
+	if (counter == 1000000) {status = I2C_TIMEOUT; goto quit;}
 
 	// Check the status of the interface
 	switch (TW_STATUS)
@@ -553,14 +667,15 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 		
 		// Error. Should never happen. Do not send stop.
 		default:
-		return I2C_RESTART_CRITICAL;
+		status = I2C_RESTART_CRITICAL;
+		goto quit;
 	}
 
 	//-------------------------------------------------------------------------------
-	//                       3. Send Device Address + Read (1)
+	//                       5. Send Device Address + Read (1)
 	//-------------------------------------------------------------------------------
 	// Save address in Register
-	REGISTER[memory_I2C_SLA] = SLA;
+	REGISTER[memory_I2C_SLA] = (uint32_t)(REGISTER[memory_I2C_SLA] << 8) | (SLA | 0x01);
 	
 	// Load SLA+W into TWDR Register...
 	TWDR = SLA | 0x01;
@@ -570,9 +685,8 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 
 	// Wait for transmission
 	counter = 0;
-	// TODO: Add timeout
 	while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
-	if (counter == 1000000) return I2C_TIMEOUT;
+	if (counter == 1000000) {status = I2C_TIMEOUT; goto quit;}
 
 	//4. Check the status of the interface
 	switch (TW_STATUS)
@@ -598,7 +712,7 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 	}
 
 	//-------------------------------------------------------------------------------
-	//                        4. Read
+	//                                   6. Read
 	//-------------------------------------------------------------------------------
 	for (int II=0; II < read_len; II++)
 	{
@@ -607,9 +721,8 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 		
 		// Wait for transmission
 		long counter = 0;
-		// TODO: Add timeout
 		while (!(TWCR & (1<<TWINT)) && (counter < 1000000)) {counter ++; _delay_us(1);}
-		if (counter == 1000000) return I2C_TIMEOUT;
+		if (counter == 1000000) {status = I2C_TIMEOUT; goto quit;}
 		
 		switch (TW_STATUS)
 		{
@@ -640,6 +753,9 @@ int I2C_READ(uint8_t SLA, uint8_t * data_write, int write_len, uint8_t * data_re
 
 	//7. Transmit STOP condition
 	TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO);
+
+	// Enable interrupts
+	sei();
 
 	return status;
 }
@@ -689,6 +805,9 @@ int ADC_INIT(unsigned long F_ADC)
 }
 int ADC_READ(int line, int* data)
 {
+	// Disable interrupts
+	cli();
+	
 	// Input channel selection
 	ADMUX |= line;
 	
@@ -698,7 +817,12 @@ int ADC_READ(int line, int* data)
 	// Wait for conversion to be done
 	long counter = 0;
 	while((ADCSRA & (1<<ADIF)) && (counter < 1000000)) {counter ++; _delay_us(1);}
-	if (counter == 1000000) return ADC_TIMEOUT;
+	if (counter == 1000000){
+		// Enable interrupts
+		sei();
+		
+		return ADC_TIMEOUT;
+	}
 	
 	// Extract data
 	*data = (long)ADCL;
@@ -708,6 +832,9 @@ int ADC_READ(int line, int* data)
 	
 	// Reset channel selection
 	ADMUX &= ~(line);
+	
+	// Enable interrupts
+	sei();
 	
 	return OK;
 }

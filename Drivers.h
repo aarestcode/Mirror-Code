@@ -34,31 +34,43 @@ unsigned char Feedback[MessageN]; //Vector of transmitted bytes
 // ERROR ENUM
 enum communication{
 	COMMUNICATION_READ_PORT = 101,
-	COMMUNICATION_WRITE_PORT
+	COMMUNICATION_WRITE_PORT,
+	COMMUNICATION_CHECK_CHECKSUM
 };
 
 // FUNCTIONS
 int COMMUNICATION_INIT(long timeout_ms)
 {
 	//TODO XBEE_INIT
-	
+		
 	// Initialize register
 	REGISTER[memory_MESSAGE_COUNT0] = 0;
 	REGISTER[memory_FEEDBACK_COUNT0] = 0;
 	REGISTER[memory_MESSAGE_COUNT1] = 0;
 	REGISTER[memory_FEEDBACK_COUNT1] = 0;
 	
+	// Timeout to read a known length message
 	REGISTER[memory_COMMUNICATION_TIMEOUT] = timeout_ms;
 	
 	return OK;
 }
 int IsCommandWaiting(void)
 {
-	if(USART0_FLAG()) return 1; // USB (priority)
-	if(USART1_FLAG()) return 2; // XBee
-	return 0;
+	if(USART0_buffer_index >= (MessageN)){ // USB (priority)
+		int ID = USART0_buffer_index / (MessageN) - 1;
+		for ( int II = 0; II < (MessageN); II++) Message[II] = USART0_buffer[(MessageN) * ID + II];
+		USART0_buffer_index -= (MessageN);
+		return 1; 
+	}
+	if(USART1_buffer_index >= MessageN){ // XBee
+		int ID = USART1_buffer_index / (MessageN) - 1;
+		for ( int II = 0; II < (MessageN); II++) Message[II] = USART1_buffer[(MessageN) * ID + II];
+		USART1_buffer_index -= (MessageN);
+		return 2;
+	} 
+	return OK;
 }
-int LoadMessage(int port, uint8_t * buffer, int len, long timeout_ms)
+int LoadMessage(int port, uint8_t * buffer, int len)
 {
 	int error;
 	
@@ -69,7 +81,7 @@ int LoadMessage(int port, uint8_t * buffer, int len, long timeout_ms)
 		//Loop over the number of bytes to be received
 		for (int II = 0; II < len; II++)
 		{
-			error = USART0_READ(&temp, timeout_ms);
+			error = USART0_READ(&temp);
 			if(error) {USART0_FLUSH(); return error;}
 
 			buffer[II] = temp;
@@ -82,7 +94,7 @@ int LoadMessage(int port, uint8_t * buffer, int len, long timeout_ms)
 		//Loop over the number of bytes to be received
 		for (int II = 0; II < len; II++)
 		{
-			error = USART1_READ(&temp, timeout_ms);
+			error = USART1_READ(&temp);
 			if(error) {USART1_FLUSH(); return error;}
 
 			buffer[II] = temp;
@@ -95,10 +107,6 @@ int LoadMessage(int port, uint8_t * buffer, int len, long timeout_ms)
 	REGISTER[memory_MESSAGE_COUNT0 + port -1] ++;
 	
 	return OK;
-}
-int SaveCommand(int port)
-{
-	return LoadMessage(port, Message, MessageN, REGISTER[memory_COMMUNICATION_TIMEOUT]);
 }
 int SendFeedback(int port, int address, long data)
 {
@@ -153,6 +161,46 @@ int SendFeedback(int port, int address, long data)
 
 	return OK;
 }
+int CheckMessage(int port, unsigned int * command, signed long * data, unsigned int * checksum){
+	
+	// Checksum
+	if(MessageChecksumN)
+	{
+		unsigned int sum = 0;
+		for(int II = 0; II < (MessageN)-MessageChecksumN; II++)
+		sum += Message[II];
+		
+		unsigned int check = 0;
+		for (int II = 0; II < MessageChecksumN; II++)
+		check |= (Message[MessageCommandN+MessageDataN+II] << 8*(MessageChecksumN-II-1));
+		
+		sum += check;
+		
+		unsigned int mask = (1 << 8*MessageChecksumN) - 1;
+		*checksum = sum & mask;
+		
+		if(*checksum != mask)
+		{
+			if (port == 1) USART0_FLUSH();
+			if (port == 2) USART1_FLUSH();
+			
+			return COMMUNICATION_CHECK_CHECKSUM;
+		}
+	}
+	
+	// Command
+	*command = 0;
+	for (int II = 0; II < MessageCommandN; II++)
+	*command |= (Message[II] << 8*(MessageCommandN-II-1));
+	
+	// Data
+	*data = 0;
+	for (int II = 0; II < MessageDataN; II++)
+	*data |= ((int32_t)Message[MessageCommandN+II] << 8*(MessageDataN-II-1));
+	
+	return OK;
+}
+
 
 /*--------------------------------------------------
                     POWER/HV BOARD
@@ -226,6 +274,10 @@ int POWER_INIT(void){
 	error = EnableSV(TWO_EIGHT_V_E,false);
 	if(error) return error;
 	
+	// Set Current Limiters Enable as output
+	DDR_CL_E |= ((1<<CL1_E) | (1<<CL2_E) | (1<<CL3_E));
+	PORT_CL_E &= ~((1<<CL1_E) | (1<<CL2_E) | (1<<CL3_E));
+	
 	// Disable Current Limiters
 	error = EnableCL(CL1_E,false);
 	if(error) return error;
@@ -233,11 +285,7 @@ int POWER_INIT(void){
 	if(error) return error;
 	error = EnableCL(CL3_E,false);
 	if(error) return error;
-	
-	// Set Current Limiters Enable as output
-	DDR_CL_E |= ((1<<CL1_E) | (1<<CL2_E) | (1<<CL3_E));
-	PORT_CL_E &= ~((1<<CL1_E) | (1<<CL2_E) | (1<<CL3_E));
-	
+		
 	// Set Current Limiters Fault as inputs
 	DDR_CL_F1 &= ~((1<<CL2_F) | (1<<CL3_F));
 	DDR_CL_F2 &= ~(1<<CL1_F);
@@ -253,7 +301,7 @@ int ActivateHV(void)
 	if(error) return error;
 	
 	// 2) Command variable HV to 0V
-	error = SetVoltage(10000);
+	error = SetVoltage(0x3fff);
 	if(error) return error;	
 	
 	// 3) Command ground to 0V
@@ -269,9 +317,9 @@ int ActivateHV(void)
 	if(error) return error;
 	
 	// 6) Check HV_VOLTAGE at 2.5V
-	/*_delay_ms(1500);
+	_delay_ms(2000);
 	int val;
-	error = MeasureV(PICOMOTOR_VOLTAGE,&val);
+	error = MeasureV(HV_VOLTAGE,&val);
 	if(error) return error;
 	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
 		// Disable CL3
@@ -279,7 +327,7 @@ int ActivateHV(void)
 		if(error) return error;
 		
 		return VAR_FEEDBACK_OOB;
-	}*/
+	}
 		
 	// 7) Check CL3
 	/*if(IsCLFault(3)){
@@ -295,8 +343,8 @@ int ActivateHV(void)
 	if(error) return error;
 	
 	// 9) Check HV_GROUND at 2.5V
-	/*_delay_ms(1500);
-	error = MeasureV(PICOMOTOR_VOLTAGE,&val);
+	_delay_ms(2000);
+	error = MeasureV(HV_GROUND,&val);
 	if(error) return error;
 	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
 		// Disable CL2
@@ -304,7 +352,7 @@ int ActivateHV(void)
 		if(error) return error;
 		
 		return GROUND_FEEDBACK_OOB;
-	}*/
+	}
 	
 	// 10) Check CL2 //TODO
 	/*if(IsCLFault(2)){
@@ -356,7 +404,7 @@ int ActivatePICOV(bool withEncoders){
 	if(error) return error;
 	
 	// 3) Check PICOMOTOR_VOLTAGE at 2.5V !!! TAKES ABOUT 1.5 sec TO STABILIZE !!!
-	_delay_ms(1500);
+	_delay_ms(2000);
 	int val;
 	error = MeasureV(PICOMOTOR_VOLTAGE,&val);
 	if(error) return error;
@@ -522,20 +570,10 @@ const int IOEport[3] = {0x12,0x13,0x13}; // Address of the port to which each pi
 const int IOEpin[12] = {1,0,3,2,1,0,3,2,5,4,7,6}; // Pin of each port to which the switch is connected (pico1_FW_HIGH, pico1_FW_LOW, pico1_BW_HIGH, pico1_BW_LOW, ...)
 
 // ENCODER PINSET
-#define DDR_ENCODER0 DDRC
-#define PIN_ENCODER0 PINC
-#define ENCODER0A PINC2
-#define ENCODER0B PINC3
-
-#define DDR_ENCODER1 DDRD
-#define PIN_ENCODER1 PIND
-#define ENCODER1A PIND6
-#define ENCODER1B PIND7
-
-#define DDR_ENCODER2 DDRD
-#define PIN_ENCODER2 PIND
-#define ENCODER2A PIND4
-#define ENCODER2B PIND5
+#define DDR_ENCODER DDRC
+#define PIN_ENCODER PINC
+#define ENCODERA PINC2
+#define ENCODERB PINC3
 
 // ENCODER STATES
 enum EncoderState {state00,state10,state11,state01}; 
@@ -551,9 +589,8 @@ int PICOMOTORS_INIT(void)
 	int error;
 	
 	// Set Encoders as inputs
-	//DDR_ENCODER0 &= ~((1<<ENCODER0A) | (1<<ENCODER0B));
-	//DDR_ENCODER1 &= ~((1<<ENCODER1A) | (1<<ENCODER1B));
-	//DDR_ENCODER2 &= ~((1<<ENCODER2A) | (1<<ENCODER2B));
+	DDR_ENCODER &= ~((1<<ENCODERA) | (1<<ENCODERB));
+	// TODO: Set IO expander for encoder
 	
 	// Set CONFIGURATION bits to 0
 	error = SPI_WRITE(SELECT_PICO,(uint8_t [3]){IOEaddr, 0x0A, 0x00},3);
@@ -642,27 +679,15 @@ int GetEncoderState(int index, int* state)
 	// INPUT  index = 0 or 1 or 2 depending on the encoder
 	// OUTPUT state = state00 or state10 or state11 or state01 (depending of state of channel A and B resp.)
 	
-	if(index==0){
-		char PIN = PIN_ENCODER0;
-		if ((PIN & (1<<ENCODER0A)) && (PIN & (1<<ENCODER0B))) {REGISTER[memory_ENCODER0_STATE] = state11; *state = state11; return OK;}
-		if ((PIN & (1<<ENCODER0A)) && !(PIN & (1<<ENCODER0B))) {REGISTER[memory_ENCODER0_STATE] = state10; *state = state10; return OK;}
-		if (!(PIN & (1<<ENCODER0A)) && (PIN & (1<<ENCODER0B))) {REGISTER[memory_ENCODER0_STATE] = state01; *state = state01; return OK;}
-		if (!(PIN & (1<<ENCODER0A)) && !(PIN & (1<<ENCODER0B))) {REGISTER[memory_ENCODER0_STATE] = state00; *state = state00; return OK;}
+	if( REGISTER[memory_ENCODER_SELECT] != index ){
+		//TODO: Select channel
+		REGISTER[memory_ENCODER_SELECT] = index;
 	}
-	if(index==1){
-		char PIN = PIN_ENCODER1;
-		if ((PIN & (1<<ENCODER1A)) && (PIN & (1<<ENCODER1B))) {REGISTER[memory_ENCODER1_STATE] = state11; *state = state11; return OK;}
-		if ((PIN & (1<<ENCODER1A)) && !(PIN & (1<<ENCODER1B))) {REGISTER[memory_ENCODER1_STATE] = state10; *state = state10; return OK;}
-		if (!(PIN & (1<<ENCODER1A)) && (PIN & (1<<ENCODER1B))) {REGISTER[memory_ENCODER1_STATE] = state01; *state = state01; return OK;}
-		if (!(PIN & (1<<ENCODER1A)) && !(PIN & (1<<ENCODER1B))) {REGISTER[memory_ENCODER1_STATE] = state00; *state = state00; return OK;}
-	}
-	if(index==2){
-		char PIN = PIN_ENCODER2;
-		if ((PIN & (1<<ENCODER2A)) && (PIN & (1<<ENCODER2B))) {REGISTER[memory_ENCODER2_STATE] = state11; *state = state11; return OK;}
-		if ((PIN & (1<<ENCODER2A)) && !(PIN & (1<<ENCODER2B))) {REGISTER[memory_ENCODER2_STATE] = state10; *state = state10; return OK;}
-		if (!(PIN & (1<<ENCODER2A)) && (PIN & (1<<ENCODER2B))) {REGISTER[memory_ENCODER2_STATE] = state01; *state = state01; return OK;}
-		if (!(PIN & (1<<ENCODER2A)) && !(PIN & (1<<ENCODER2B))) {REGISTER[memory_ENCODER2_STATE] = state00; *state = state00; return OK;}
-	}
+		
+	if ((PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = state11; *state = state11; return OK;}
+	if ((PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = state10; *state = state10; return OK;}
+	if (!(PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = state01; *state = state01; return OK;}
+	if (!(PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = state00; *state = state00; return OK;}
 	
 	return ENCODER_STATE_CRITICAL;
 }
@@ -735,11 +760,11 @@ int ChannelOff(int ch)
 // ADDRESSES OF SENSORS
 const uint8_t MCP9801addr[1] = {0x9E}; // const uint8_t MCP9801addr[2] = {0x9E, 0x92}; 
 const uint8_t PCT2075addr[0] = {}; // const uint8_t PCT2075addr[2] = {0x9E, 0x90}; 
-const uint8_t TMP006addr[0] = {}; //const uint8_t TMP006addr[3] = {0x80, 0x82, 0x8A};
+const uint8_t TMP006addr[1] = {0x8A}; //const uint8_t TMP006addr[3] = {0x80, 0x82, 0x8A};
 
 	
 // PARAMETERS
-const float S0[1] = {1.0}; // TODO: Calibrate S0
+const double S0[3] = {0.00000000000006, 0.00000000000006, 0.00000000000006}; // TODO: Calibrate S0
 
 // ENUM
 enum temp_sensors{
@@ -798,7 +823,7 @@ int GetTemperaturePCT2075(int sensor_index, int16_t * temperature_128){
 	
 	uint8_t read_data[2];
 	
-	int status = I2C_READ(MCP9801addr[sensor_index], (uint8_t [1]){0}, 1, read_data, 2);
+	int status = I2C_READ(PCT2075addr[sensor_index], (uint8_t [1]){0}, 1, read_data, 2);
 	if(status) return status;
 	
 	int16_t temp_256 = (read_data[0] << 8) + read_data[1];
@@ -818,20 +843,22 @@ int GetTemperatureTMP006(int sensor_index, int16_t * temperature_128){
 	int status = I2C_READ(TMP006addr[sensor_index], (uint8_t [1]){0x01}, 1, read_data, 2);
 	if(status) return status;
 	
-	float T_DIE = (float)((read_data[0]<<8) + read_data[1])/128;
+	signed long data = (read_data[0]<<8) + read_data[1];
+	double T_DIE = data / 128.0 + 273.15; // in Kelvin
 	
 	// EXTRACT V_SENSOR
 	status = I2C_READ(TMP006addr[sensor_index], (uint8_t [1]){0x00}, 1, read_data, 2);
 	if(status) return status;
 	
-	float V_SENSOR = (float)((read_data[0]<<8) + read_data[1]);
+	data = (read_data[0]<<8) + read_data[1];
+	double V_SENSOR = data * 0.00000015625; // in Volt
 	
 	// Temperature calculation
-	float T_REF = 298.15;
-	float S = S0[sensor_index]*( 1 + 0.00175*( T_DIE - T_REF ) - 0.00001678*pow(T_DIE - T_REF,2));
-	float V_OS = -0.0000294 - 0.00000057*(T_DIE - T_REF) + 0.00000000463*pow(T_DIE - T_REF,2);
-	float f = (V_SENSOR - V_OS) + 13.4*pow(V_SENSOR - V_OS,2);
-	float T_OBJ = pow(pow(T_DIE,4) + (f/S),0.25);
+	double T_REF = 298.15; // in Kelvin
+	double S = S0[sensor_index]*( 1 + 0.00175*( T_DIE - T_REF ) - 0.00001678*pow(T_DIE - T_REF,2));
+	double V_OS = -0.0000294 - 0.00000057*(T_DIE - T_REF) + 0.00000000463*pow(T_DIE - T_REF,2);
+	double f = (V_SENSOR - V_OS) + 13.4*pow(V_SENSOR - V_OS,2);
+	double T_OBJ = pow(pow(T_DIE,4) + (f/S),0.25) - 273.15; // in Celsius
 	
 	REGISTER[memory_TEMP_TMP006_1+sensor_index] = T_OBJ*128;
 	*temperature_128 = T_OBJ*128;

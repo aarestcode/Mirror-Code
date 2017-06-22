@@ -17,38 +17,13 @@ int ParseCommand(int port)
 	/*--------------------------------------------------
                        MESSAGE CHECK
 	--------------------------------------------------*/
-	int II;
-	
-	// Checksum
-	if(MessageChecksumN)
-	{
-		unsigned int sum = 0;
-		for(II = 0; II < MessageN-MessageChecksumN; II++) sum += Message[II];
-		
-		unsigned int checksum = 0;
-		for (II = 0; II < MessageChecksumN; II++) checksum |= (Message[MessageCommandN+MessageDataN+II] << 8*(MessageChecksumN-II-1));
-		
-		sum += checksum;
-		
-		unsigned int mask = (1 << 8*MessageChecksumN) - 1;
-		checksum = sum & mask;
-		
-		if(checksum != mask)
-		{
-			int error = SendFeedback(port,253,checksum);
-			if(error) return error;
-		}
-
-	}
-	
-	// Command
-	unsigned int command = 0;
-	for (II = 0; II < MessageCommandN; II++) command |= (Message[II] << 8*(MessageCommandN-II-1));
-	
-	// Data
-	signed long data = 0;
-	for (II = 0; II < MessageDataN; II++) data |= ((int32_t)Message[MessageCommandN+II] << 8*(MessageDataN-II-1));
-
+	unsigned int command;
+	signed long data;
+	unsigned int checksum;
+	if (CheckMessage(port, &command, &data, &checksum)){
+		int error = SendFeedback(port,253,checksum);
+		if(error) return error;
+	}	
 
 	/*--------------------------------------------------
                            PRIVATE
@@ -112,15 +87,22 @@ int ParseCommand(int port)
 		if(error) return error;
 	}
 	
-	// RE-INITIALIZE ADC
+	// TEST I2C
 	else if (command==155){
+		int status = I2C_WRITE(data, (uint8_t [0]){}, 0);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE ADC
+	else if (command==156){
 		int status = ADC_INIT(data);
 		int error = SendFeedback(port,command,status);
 		if(error) return error;
 	}
 	
 	// RE-INITIALIZE COMMUNICATIONS
-	else if (command==156){
+	else if (command==157){
 		int status = COMMUNICATION_INIT(data);
 		int error = SendFeedback(port,command,status);
 		if(error) return error;
@@ -470,7 +452,7 @@ int ParseCommand(int port)
 		int error = SendFeedback(port,command,0);
 		if(error) return error;	
 		
-		int status = LoadMessage(port, &(buffer[2]), length,(long)10000);
+		int status = LoadMessage(port, &(buffer[2]), length);
 		if(status==0) status = WriteinEEPROM(eeprom_index, buffer, length);
 		error = SendFeedback(port,command,status);
 		if(error) return error;
@@ -531,8 +513,8 @@ int main(void)
 	SEP_DEV_INIT();
 	TEMP_SENSORS_INIT();
 	
-	PICOMOTOR_ESTIMATION_INIT(100);
-	//ELECTRODE_ACTUATION_INIT();
+	//PICOMOTOR_ESTIMATION_INIT(100);
+	ELECTRODE_ACTUATION_INIT();
 	
 	int ch = 0;
 	int status;
@@ -540,13 +522,11 @@ int main(void)
 	
     while (1)
     {	
-		// Receive telecommand (if any)	
-		if(IsCommandWaiting()){
-				port=IsCommandWaiting();
-				status = SaveCommand(port);
-				if(status == 0) ParseCommand(port);
+		// Receive telecommand (if any)
+		if ( (port = IsCommandWaiting()) ){	
+			ParseCommand(port);
 		}
-		/*
+		
 		// Actuate the electrode
 		if(REGISTER[memory_ELECTRODE1 + ch]){
 			status = ActuateElectrode(ch);
@@ -555,6 +535,6 @@ int main(void)
 		
 		// Update electrode index
 		if (++ch >= N_electrodes) ch = 0;				
-			*/
+			
     }
 }
