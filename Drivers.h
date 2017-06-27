@@ -20,9 +20,9 @@
 #define OK 0
 #endif
 
-/*--------------------------------------------------
-              COMMUNICATION (XBEE & USB)
---------------------------------------------------*/
+//---------------------------------------------------------------------------------------
+//					             COMMUNICATION (XBEE & USB)
+//---------------------------------------------------------------------------------------
 // PARAMETERS
 #define MessageCommandN 1 //Length of command in byte
 #define MessageDataN 4 // Length of data
@@ -33,7 +33,13 @@ unsigned char Feedback[MessageN]; //Vector of transmitted bytes
 
 // ERROR ENUM
 enum communication{
-	COMMUNICATION_READ_PORT = 101,
+	COMMUNICATION_INIT_CODE = 101,
+	COMMUNICATION_ISCOMMANDWAITING_CODE,
+	COMMUNICATION_LOADMESSAGE_CODE,
+	COMMUNICATION_SENDFEEDBACK_CODE,
+	COMMUNICATION_CHECKMESSAGE_CODE,
+	
+	COMMUNICATION_READ_PORT,
 	COMMUNICATION_WRITE_PORT,
 	COMMUNICATION_CHECK_CHECKSUM
 };
@@ -41,6 +47,8 @@ enum communication{
 // FUNCTIONS
 int COMMUNICATION_INIT(long timeout_ms)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | COMMUNICATION_INIT_CODE;
+	
 	//TODO XBEE_INIT
 		
 	// Initialize register
@@ -56,87 +64,106 @@ int COMMUNICATION_INIT(long timeout_ms)
 }
 int IsCommandWaiting(void)
 {
-	if(USART0_buffer_index >= (MessageN)){ // USB (priority)
-		int ID = USART0_buffer_index / (MessageN) - 1;
-		for ( int II = 0; II < (MessageN); II++) Message[II] = USART0_buffer[(MessageN) * ID + II];
-		USART0_buffer_index -= (MessageN);
+	cli();
+	
+	//REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | COMMUNICATION_ISCOMMANDWAITING_CODE;
+	
+	if(UART0_buffer_index >= (MessageN)){ // USB (priority)
+		//int ID = UART0_buffer_index / (MessageN) - 1;
+		//for ( int II = 0; II < (MessageN); II++) Message[II] = UART0_buffer[(MessageN) * ID + II];
+		//UART0_buffer_index -= (MessageN);
+		for ( int II = 0; II < (MessageN); II++) Message[II] = UART0_buffer[UART0_buffer_index - (MessageN) + II];
+		UART0_FLUSH();
+		sei();
 		return 1; 
 	}
-	if(USART1_buffer_index >= MessageN){ // XBee
-		int ID = USART1_buffer_index / (MessageN) - 1;
-		for ( int II = 0; II < (MessageN); II++) Message[II] = USART1_buffer[(MessageN) * ID + II];
-		USART1_buffer_index -= (MessageN);
+	if(UART1_buffer_index >= MessageN){ // XBee
+		//int ID = UART1_buffer_index / (MessageN) - 1;
+		//for ( int II = 0; II < (MessageN); II++) Message[II] = UART1_buffer[(MessageN) * ID + II];
+		//UART1_buffer_index -= (MessageN);
+		for ( int II = 0; II < (MessageN); II++) Message[II] = UART1_buffer[UART1_buffer_index - (MessageN) + II];
+		UART1_FLUSH();
+		sei();
 		return 2;
 	} 
+	
+	sei();
+	
 	return OK;
 }
-int LoadMessage(int port, uint8_t * buffer, int len)
+int LoadMessage(int port, uint8_t * buffer, uint16_t len)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | COMMUNICATION_LOADMESSAGE_CODE;
+	
+	//TODO: Redo using UART interrupt
+	
 	int error;
 	
 	//The message byte
-	char temp;
+	uint8_t temp;
 	
 	if(port==1){			// USB
 		//Loop over the number of bytes to be received
 		for (int II = 0; II < len; II++)
 		{
-			error = USART0_READ(&temp);
-			if(error) {USART0_FLUSH(); return error;}
+			error = UART0_READ(&temp);
+			if(error) {UART0_FLUSH(); return error;}
 
 			buffer[II] = temp;
 		}
 		
 		// Flush the rest to clear the buffers
-		USART0_FLUSH();
+		UART0_FLUSH();
 	}
 	else if (port==2){		// XBee
 		//Loop over the number of bytes to be received
 		for (int II = 0; II < len; II++)
 		{
-			error = USART1_READ(&temp);
-			if(error) {USART1_FLUSH(); return error;}
+			error = UART1_READ(&temp);
+			if(error) {UART1_FLUSH(); return error;}
 
 			buffer[II] = temp;
 		}
 		
 		// Flush the rest to clear the buffers
-		USART1_FLUSH();
+		UART1_FLUSH();
 	}
 	else return COMMUNICATION_READ_PORT;
 	REGISTER[memory_MESSAGE_COUNT0 + port -1] ++;
 	
 	return OK;
 }
-int SendFeedback(int port, int address, long data)
+int SendFeedback(int port, uint8_t address, int32_t data)
 {
+	//REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | COMMUNICATION_SENDFEEDBACK_CODE;
+	
 	int error;
 	int II;
-	unsigned int sum = 0;
+	uint32_t sum = 0;
 
 	// Address
 	for (II = 0; II < MessageCommandN; II++)
 	{
 		sum += (address >> 8*(MessageCommandN-II-1)) & 0xff;
-		Feedback[II] = (unsigned char)(address >> 8*(MessageCommandN-II-1));
+		Feedback[II] = (uint8_t)(address >> 8*(MessageCommandN-II-1));
 	}
 	
 	// Data
 	for (II = 0; II < MessageDataN; II++)
 	{
 		sum += (data >> 8*(MessageDataN-II-1)) & 0xff;
-		Feedback[MessageCommandN + II] = (unsigned char)(data >> 8*(MessageDataN-II-1));
+		Feedback[MessageCommandN + II] = (uint8_t)(data >> 8*(MessageDataN-II-1));
 	}
 
 	// Checksum
 	if(MessageChecksumN)
 	{
-		unsigned int mask = (1<<8*MessageChecksumN) - 1;
-		unsigned int checksum = mask - (sum & mask);
+		uint32_t mask = (1<<8*MessageChecksumN) - 1;
+		uint32_t checksum = mask - (sum & mask);
 		
 		for (II = 0; II < MessageChecksumN; II++)
 		{
-			Feedback[MessageCommandN + MessageDataN + II] = (unsigned char)(checksum >> 8*(MessageChecksumN-II-1));
+			Feedback[MessageCommandN + MessageDataN + II] = (uint8_t)(checksum >> 8*(MessageChecksumN-II-1));
 		}
 	}
 
@@ -145,14 +172,14 @@ int SendFeedback(int port, int address, long data)
 	if (port==1){
 		for(II = 0; II < MessageN; II++)
 		{
-			error = USART0_WRITE(Feedback[II]);
+			error = UART0_WRITE(Feedback[II]);
 			if(error) return error;
 		}
 	}
 	else if (port==2){
 		for(II = 0; II < MessageN; II++)
 		{
-			error = USART1_WRITE(Feedback[II]);
+			error = UART1_WRITE(Feedback[II]);
 			if(error) return error;
 		}
 	}
@@ -161,28 +188,30 @@ int SendFeedback(int port, int address, long data)
 
 	return OK;
 }
-int CheckMessage(int port, unsigned int * command, signed long * data, unsigned int * checksum){
+int CheckMessage(int port, uint8_t * command, int32_t * data, uint16_t * checksum)
+{
+	//REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | COMMUNICATION_CHECKMESSAGE_CODE;
 	
 	// Checksum
 	if(MessageChecksumN)
 	{
-		unsigned int sum = 0;
-		for(int II = 0; II < (MessageN)-MessageChecksumN; II++)
+		uint32_t sum = 0;
+		for(int II = 0; II < (MessageN)-(MessageChecksumN); II++)
 		sum += Message[II];
 		
-		unsigned int check = 0;
-		for (int II = 0; II < MessageChecksumN; II++)
-		check |= (Message[MessageCommandN+MessageDataN+II] << 8*(MessageChecksumN-II-1));
+		uint32_t check = 0;
+		for (int II = 0; II < (MessageChecksumN); II++)
+		check |= (Message[(MessageCommandN)+(MessageDataN)+II] << 8*((MessageChecksumN)-II-1));
 		
 		sum += check;
 		
-		unsigned int mask = (1 << 8*MessageChecksumN) - 1;
+		uint32_t mask = (1 << 8*(MessageChecksumN)) - 1;
 		*checksum = sum & mask;
 		
 		if(*checksum != mask)
 		{
-			if (port == 1) USART0_FLUSH();
-			if (port == 2) USART1_FLUSH();
+			if (port == 1) UART0_FLUSH();
+			if (port == 2) UART1_FLUSH();
 			
 			return COMMUNICATION_CHECK_CHECKSUM;
 		}
@@ -190,21 +219,21 @@ int CheckMessage(int port, unsigned int * command, signed long * data, unsigned 
 	
 	// Command
 	*command = 0;
-	for (int II = 0; II < MessageCommandN; II++)
-	*command |= (Message[II] << 8*(MessageCommandN-II-1));
+	for (int II = 0; II < (MessageCommandN); II++)
+	*command |= (Message[II] << 8*((MessageCommandN)-II-1));
 	
 	// Data
 	*data = 0;
-	for (int II = 0; II < MessageDataN; II++)
-	*data |= ((int32_t)Message[MessageCommandN+II] << 8*(MessageDataN-II-1));
+	for (int II = 0; II < (MessageDataN); II++)
+	*data |= ((int32_t)Message[(MessageCommandN)+II] << 8*((MessageDataN)-II-1));
 	
 	return OK;
 }
 
 
-/*--------------------------------------------------
-                    POWER/HV BOARD
---------------------------------------------------*/
+//---------------------------------------------------------------------------------------
+//					                    POWER/HV BOARD
+//---------------------------------------------------------------------------------------
 // AD5641
 // PINSET
 #define DDR_SV DDRB
@@ -239,12 +268,24 @@ int SetVoltage(uint16_t voltage);
 int SetBias(uint16_t voltage);
 int EnableSV(int port, bool state);
 int EnableCL(int port, bool state);
-int MeasureV(int port, int* val);
+int MeasureV(int port, uint16_t* val);
 bool IsCLFault(int port);
 
 // ERROR ENUM
 enum power_driver{
-	VAR_FEEDBACK_OOB = 121,
+	POWER_INIT_CODE = 111,
+	POWER_ACTIVATEHV_CODE,
+	POWER_DEACTIVATEHV_CODE,
+	POWER_ACTIVATEPICO_CODE,
+	POWER_DEACTIVATEPICO_CODE,
+	POWER_SETVOLTAGE_CODE,
+	POWER_SETBIAS_CODE,
+	POWER_ENABLESV_CODE,
+	POWER_ENABLECL_CODE,
+	POWER_MEASUREV_CODE,
+	POWER_ISCLFAULT_CODE,
+	
+	VAR_FEEDBACK_OOB,
 	GROUND_FEEDBACK_OOB,
 	PICOMOTOR_FEEDBACK_OOB,
 	BUSV_OOB,
@@ -257,9 +298,12 @@ enum power_driver{
 	};
 
 // FUNCTIONS
-int POWER_INIT(void){	
+int POWER_INIT(void)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_INIT_CODE;
+		
 	// Set tolerance on ADC feedback
-	REGISTER[memory_HV_TOL_V] = 31; // 0.1V tolerance over 3.3V max
+	REGISTER[memory_HV_TOL_V] = 50; // 0.15V tolerance over 3.3V max
 
 	// Set Supply voltage enable as output
 	DDR_SV |= ((1<<FIVE_V_E) | (1<<TWELVE_V_E) | (1<<TWO_EIGHT_V_E));
@@ -294,6 +338,8 @@ int POWER_INIT(void){
 }
 int ActivateHV(void)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_ACTIVATEHV_CODE;
+	
 	int error;
 	
 	// 1) Enable 5V
@@ -317,8 +363,8 @@ int ActivateHV(void)
 	if(error) return error;
 	
 	// 6) Check HV_VOLTAGE at 2.5V
-	_delay_ms(2000);
-	int val;
+	_delay_ms(1500);
+	uint16_t val;
 	error = MeasureV(HV_VOLTAGE,&val);
 	if(error) return error;
 	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
@@ -343,7 +389,7 @@ int ActivateHV(void)
 	if(error) return error;
 	
 	// 9) Check HV_GROUND at 2.5V
-	_delay_ms(2000);
+	_delay_ms(1500);
 	error = MeasureV(HV_GROUND,&val);
 	if(error) return error;
 	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
@@ -365,7 +411,10 @@ int ActivateHV(void)
 	
 	return OK;
 }
-int DeactivateHV(void){
+int DeactivateHV(void)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_DEACTIVATEHV_CODE;
+	
 	int error;
 	
 	// 1) Command variable HV to BIAS
@@ -392,7 +441,10 @@ int DeactivateHV(void){
 	return OK;
 	
 }
-int ActivatePICOV(bool withEncoders){
+int ActivatePICOV(bool withEncoders)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_ACTIVATEPICO_CODE;
+	
 	int error;
 	
 	// 1) Enable 12V
@@ -404,8 +456,8 @@ int ActivatePICOV(bool withEncoders){
 	if(error) return error;
 	
 	// 3) Check PICOMOTOR_VOLTAGE at 2.5V !!! TAKES ABOUT 1.5 sec TO STABILIZE !!!
-	_delay_ms(2000);
-	int val;
+	_delay_ms(1500);
+	uint16_t val;
 	error = MeasureV(PICOMOTOR_VOLTAGE,&val);
 	if(error) return error;
 	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
@@ -433,7 +485,10 @@ int ActivatePICOV(bool withEncoders){
 	
 	return OK;
 }
-int DeactivatePICOV(void){
+int DeactivatePICOV(void)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_DEACTIVATEPICO_CODE;
+	
 	int error;
 	
 	// 1) Disable 12V
@@ -452,13 +507,18 @@ int DeactivatePICOV(void){
 }
 int SetVoltage(uint16_t voltage)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_SETVOLTAGE_CODE;
+	
 	int error = SPI_WRITE(SELECT_HV,(uint8_t [2]){voltage>>8, voltage},2);
 	if(error) return error;
 	
 	REGISTER[memory_HV] = voltage;
 	return OK;
 }
-int SetBias(uint16_t voltage){
+int SetBias(uint16_t voltage)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_SETBIAS_CODE;
+	
 	int error = SPI_WRITE(SELECT_BIAS,(uint8_t [2]){voltage>>8, voltage},2);
 	if(error) return error;
 	
@@ -467,6 +527,8 @@ int SetBias(uint16_t voltage){
 }
 int EnableSV(int port, bool state)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_ENABLESV_CODE;
+	
 	// PORT = FIVE_V_E or TWELVE_V_E or TWO_EIGHT_V_E
 	// State = true means enable // State = false means disable
 	if(state) PORT_SV |= (1<<port);
@@ -476,6 +538,8 @@ int EnableSV(int port, bool state)
 }
 int EnableCL(int port, bool state)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_ENABLECL_CODE;
+	
 	// PORT = CL1_E or CL2_E or CL3_E
 	// State = true means enable // State = false means disable
 	if(state) PORT_CL_E &= ~(1<<port);
@@ -483,8 +547,10 @@ int EnableCL(int port, bool state)
 	
 	return OK;
 }
-int MeasureV(int port, int* val)
+int MeasureV(int port, uint16_t* val)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_MEASUREV_CODE;
+	
 	// port = HV_VOLTAGE or HV_GROUND or PICOMOTOR_VOLTAGE or BUS_CURR or BUS_VOLT or SEP_VOLT
 	// OUTPUT val = value to be returned
 	int error;
@@ -497,6 +563,8 @@ int MeasureV(int port, int* val)
 }
 bool IsCLFault(int CL_index)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_ISCLFAULT_CODE;
+	
 	// CL_index = 1, 2 or 3
 	if (CL_index==1) return (PIN_CL_F2 & (1<<CL1_F));
 	if (CL_index==2) return (PIN_CL_F1 & (1<<CL2_F));
@@ -504,9 +572,9 @@ bool IsCLFault(int CL_index)
 	else return CL_INDEX_OOB;
 }
 
-/*--------------------------------------------------
-                   SEPARATION DEVICE
---------------------------------------------------*/
+//---------------------------------------------------------------------------------------
+//					                   SEPARATION DEVICE
+//---------------------------------------------------------------------------------------
 // PINSET
 #define DDR_SD_TRIG DDRB
 #define PORT_SD_TRIG PORTB
@@ -518,7 +586,10 @@ bool IsCLFault(int CL_index)
 
 // ERROR ENUM
 enum seperation_device{
-	SEPARATION_DEV_TIMEOUT = 161
+	SEP_DEV_INIT_CODE = 141,
+	SEP_DEV_RELEASE_CODE,
+	SEP_DEV_ISCONSTRAINED_CODE,
+	SEPARATION_DEV_TIMEOUT
 };
 
 bool IsMirrorConstrained(void);
@@ -526,6 +597,8 @@ bool IsMirrorConstrained(void);
 // FUNCTIONS
 int SEP_DEV_INIT(void)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | SEP_DEV_INIT_CODE;
+	
 	// Set pin as output
 	DDR_SD_TRIG |= (1<<SEP_DEV_TRIG);
 	
@@ -537,8 +610,10 @@ int SEP_DEV_INIT(void)
 	
 	return OK;
 } 
-int ReleaseMirror(long timeout_ms)
+int ReleaseMirror(uint32_t timeout_ms)
 {	
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | SEP_DEV_RELEASE_CODE;
+	
 	// Set pin to 1
 	PORT_SD_TRIG |= (1<<SEP_DEV_TRIG);
 	
@@ -557,17 +632,19 @@ int ReleaseMirror(long timeout_ms)
 	return OK;
 }
 bool IsMirrorConstrained(void){
-	// TODO
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | SEP_DEV_ISCONSTRAINED_CODE;
+	
+	// TODO: IsMirrorConstrained
 	return 1;// (PIN_SD_DET & (1<<SEP_DEV_DET));
 }
 
-/*--------------------------------------------------
-                  PICOMOTORS/ENCODERS
---------------------------------------------------*/
+//---------------------------------------------------------------------------------------
+//						             PICOMOTORS/ENCODERS
+//---------------------------------------------------------------------------------------
 // MCP23S17
-const int IOEaddr = 0x40; // Address of the IO Expander (LSB = 0 for WRITE operations)
-const int IOEport[3] = {0x12,0x13,0x13}; // Address of the port to which each picomotor is connected (pico1, pico2, pico3)
-const int IOEpin[12] = {1,0,3,2,1,0,3,2,5,4,7,6}; // Pin of each port to which the switch is connected (pico1_FW_HIGH, pico1_FW_LOW, pico1_BW_HIGH, pico1_BW_LOW, ...)
+uint8_t IOEaddr = 0x40; // Address of the IO Expander (LSB = 0 for WRITE operations)
+uint8_t IOEport[3] = {0x12,0x13,0x13}; // Address of the port to which each picomotor is connected (pico1, pico2, pico3)
+uint8_t IOEpin[12] = {1,0,3,2,1,0,3,2,5,4,7,6}; // Pin of each port to which the switch is connected (pico1_FW_HIGH, pico1_FW_LOW, pico1_BW_HIGH, pico1_BW_LOW, ...)
 
 // ENCODER PINSET
 #define DDR_ENCODER DDRC
@@ -580,12 +657,18 @@ enum EncoderState {state00,state10,state11,state01};
 
 // ERROR ENUM
 enum picomotor_driver{
-	ENCODER_STATE_CRITICAL = 141
+	PICOMOTORS_INIT_CODE = 151,
+	PICOMOTORS_MOVE_CODE,
+	PICOMOTORS_GETENCODER_CODE,
+	
+	ENCODER_STATE_CRITICAL
 	};
 
 // FUCTIONS
 int PICOMOTORS_INIT(void)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTORS_INIT_CODE;
+	
 	int error;
 	
 	// Set Encoders as inputs
@@ -622,13 +705,15 @@ int PICOMOTORS_INIT(void)
 
 	return OK;
 }
-int MovePicomotor(int index, signed int ticks)
+int MovePicomotor(int index, int32_t ticks)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTORS_MOVE_CODE;
+	
 	// INFO: @4MHz SPI clock, full message takes 37us to be sent
 	//ticks < 0 <=> BACKWARD
 	//ticks > 0 <=> FORWARD
 	int error = 0;
-	int II = 0;
+	int32_t II = 0;
 	
 	if(ticks>0)
 	{
@@ -674,8 +759,10 @@ int MovePicomotor(int index, signed int ticks)
 
 	return error;
 }
-int GetEncoderState(int index, int* state)
+int GetEncoderState(int index, uint8_t* state)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTORS_GETENCODER_CODE;
+	
 	// INPUT  index = 0 or 1 or 2 depending on the encoder
 	// OUTPUT state = state00 or state10 or state11 or state01 (depending of state of channel A and B resp.)
 	
@@ -696,67 +783,79 @@ int GetEncoderState(int index, int* state)
 //                                       MULTIPLEXER
 //---------------------------------------------------------------------------------------
 // ADRESSES OF I/O EXPANDERS
-const char MPaddr[2] = {0x98,0x84}; // Multiplexer I2C addresses (connected to SCL, SDA, V+). LSB is irrelevant (7-bit address in bit 7 to bit 1)
+uint8_t MPaddr[2] = {0x98,0x84}; // Multiplexer I2C addresses (connected to SCL, SDA, V+). LSB is irrelevant (7-bit address in bit 7 to bit 1)
 	
 // ADRESSES OF SWITCHES
 const bool MPIC[42] =   {   1,   1,   0,   0,   0,   0,   1,   0,   0,   1,   1,   0,   1,   1,   0,   1,   0,   0,   0,   0,   1,   0,   1,   0,   1,   0,   0,   0,   0,   1,   0,   1,   0,   0,   1,   0,   1,   0,   1,   0,   1,   1}; // I/O expander
-const char MPport[42] = {0x3F,0x3E,0x28,0x3E,0x39,0x38,0x34,0x2D,0x2F,0x39,0x3D,0x3C,0x30,0x2D,0x24,0x3A,0x2A,0x29,0x30,0x3D,0x2F,0x26,0x31,0x33,0x38,0x2E,0x2B,0x3A,0x25,0x33,0x3B,0x37,0x2C,0x31,0x3B,0x27,0x2E,0x3F,0x2C,0x32,0x3C,0x32};
+uint8_t MPport[42] = {0x3F,0x3E,0x28,0x3E,0x39,0x38,0x34,0x2D,0x2F,0x39,0x3D,0x3C,0x30,0x2D,0x24,0x3A,0x2A,0x29,0x30,0x3D,0x2F,0x26,0x31,0x33,0x38,0x2E,0x2B,0x3A,0x25,0x33,0x3B,0x37,0x2C,0x31,0x3B,0x27,0x2E,0x3F,0x2C,0x32,0x3C,0x32};
+	
+// ERROR ENUM
+enum mux_driver{
+	MULTIPLEXER_INIT_CODE = 161,
+	MULTIPLEXER_CHANNELON_CODE,
+	MULTIPLEXER_CHANNELOFF_CODE,
+};
 	
 // FUNCTIONS
-int MULTIPLEXER_INIT(int i)
+int MULTIPLEXER_INIT(uint8_t i)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | MULTIPLEXER_INIT_CODE;
+	
 	// Integer to return
 	int status;
 
-			// Set mode to normal
-			status = I2C_WRITE(MPaddr[i],(uint8_t [2]){0x04, 0x01},2); //Send message
-			if(status) return status;
-			
-			// Set global current to 10.5mA for 0x06, 12mA for 0x07
-			status = I2C_WRITE(MPaddr[i], (uint8_t [2]){0x02, 0x06},2); //Send message
-			if(status) return status;
-			
-			// Set all pins to LED segment driver configuration (LED = switch)
-			for (char cmd = 0x09; cmd <= 0x0F; cmd++)
-			{
-				status = I2C_WRITE(MPaddr[i], (uint8_t [2]){cmd, 0},2); //Send message
-				if(status) return status;
-			}
-			
-			// Disable nonexistent ports on smaller multiplexer
-			if (i%2==1)
-			{
-				status = I2C_WRITE(MPaddr[i], (uint8_t [2]){0x09, 0x55},2); //Send message
-				if(status) return status;
-				status = I2C_WRITE(MPaddr[i], (uint8_t [2]){0x0A, 0x55},2); //Send message
-				if(status) return status;
-			}
-			
-			// Set all output values to 0
-			for (char cmd = 0x44; cmd <= 0x5c; cmd += 8)
-			{
-				status = I2C_WRITE(MPaddr[i], (uint8_t [2]){cmd, 0},2); //Send message
-				if(status) return status;
-			}
+	// Set mode to normal
+	status = I2C_WRITE(MPaddr[i],(uint8_t [2]){0x04, 0x01},2); //Send message
+	if(status) return status;
 	
+	// Set global current to 10.5mA for 0x06, 12mA for 0x07
+	status = I2C_WRITE(MPaddr[i], (uint8_t [2]){0x02, 0x06},2); //Send message
+	if(status) return status;
+	
+	// Set all pins to LED segment driver configuration (LED = switch)
+	for (uint8_t cmd = 0x09; cmd <= 0x0F; cmd++)
+	{
+		status = I2C_WRITE(MPaddr[i], (uint8_t [2]){cmd, 0},2); //Send message
+		if(status) return status;
+	}
+		
+	// Disable nonexistent ports on smaller multiplexer
+	if (i%2==1)
+	{
+		status = I2C_WRITE(MPaddr[i], (uint8_t [2]){0x09, 0x55},2); //Send message
+		if(status) return status;
+		status = I2C_WRITE(MPaddr[i], (uint8_t [2]){0x0A, 0x55},2); //Send message
+		if(status) return status;
+	}
+	
+	// Set all output values to 0
+	for (uint8_t cmd = 0x44; cmd <= 0x5c; cmd += 8)
+	{
+		status = I2C_WRITE(MPaddr[i], (uint8_t [2]){cmd, 0},2); //Send message
+		if(status) return status;
+	}
 	return OK;
 }
-int ChannelOn(int ch)
+int ChannelOn(uint8_t ch)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | (uint32_t)MULTIPLEXER_CHANNELON_CODE;
+	
 	int status = I2C_WRITE(MPaddr[MPIC[ch]], (uint8_t [2]){MPport[ch], 1},2); //Send message
 	if(!status) REGISTER[memory_MUX_ACTIVE_CH] = ch;
 	return status;
 }
-int ChannelOff(int ch)
+int ChannelOff(uint8_t ch)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | (uint32_t)MULTIPLEXER_CHANNELOFF_CODE;
+	
 	int status = I2C_WRITE(MPaddr[MPIC[ch]], (uint8_t [2]){MPport[ch], 0},2); //Send message
 	if(!status) REGISTER[memory_MUX_ACTIVE_CH] = -1;
 	return status;
 }
 
-/*--------------------------------------------------
-                   THERMO-SENSORS
---------------------------------------------------*/
+//---------------------------------------------------------------------------------------
+//					                   THERMO-SENSORS
+//---------------------------------------------------------------------------------------
 // ADDRESSES OF SENSORS
 const uint8_t MCP9801addr[1] = {0x9E}; // const uint8_t MCP9801addr[2] = {0x9E, 0x92}; 
 const uint8_t PCT2075addr[0] = {}; // const uint8_t PCT2075addr[2] = {0x9E, 0x90}; 
@@ -768,40 +867,66 @@ const double S0[3] = {0.00000000000006, 0.00000000000006, 0.00000000000006}; // 
 
 // ENUM
 enum temp_sensors{
-	SENSOR_INDEX_OOB = 171,
+	TEMP_SENSORS_INIT_CODE = 171,
+	TEMP_SENSORS_GETMCP9801_CODE,
+	TEMP_SENSORS_GETPCT2075_CODE,
+	TEMP_SENSORS_GETTMP006_CODE,
+	
+	TEMP_SENSORS_INDEX_OOB,
 	};
 
 // FUNCTIONS
-int TEMP_SENSORS_INIT(void){
+int TEMP_SENSORS_INIT(uint8_t index)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | TEMP_SENSORS_INIT_CODE;
+	
+	// index = 0 -> initialize all
+	// index > 0 -> initialize 1 thermo sensor only (index depends on number of sensors)
 	int status;
+	int error = 0;
+	int start, end;
+	
+	int MCP9801addr_len = sizeof(MCP9801addr)/sizeof(uint8_t);
+	int PCT2075addr_len = sizeof(PCT2075addr)/sizeof(uint8_t);
+	int TMP006addr_len = sizeof(TMP006addr)/sizeof(uint8_t);
 	
 	// MCP9801 (12-bit precision)
-	for(int II=0; II < (sizeof(MCP9801addr)/sizeof(uint8_t)); II++){
+	if ( index == 0 ) {start = 0; end = MCP9801addr_len;}
+	else if ( (index - 1) < MCP9801addr_len ) {start = index - 1; end = index;}
+	else {start = 0; end = 0;}
+	for(int II = start; II < end ; II++){
 		status = I2C_WRITE(MCP9801addr[II], (uint8_t [2]){0x01, 0b01100000}, 2);
-		if(status) return status;
+		if ( status ) error = status;
 	}
 	
 	// PCT2075
-	for(int II=0; II < (sizeof(PCT2075addr)/sizeof(uint8_t)); II++){
+	if ( index == 0 ) {start = 0; end = PCT2075addr_len;}
+	else if ( (index > MCP9801addr_len) && ((index - MCP9801addr_len - 1) < PCT2075addr_len) ) {start = index - MCP9801addr_len - 1; end = index - MCP9801addr_len;}
+	else {start = 0; end = 0;}
+	for(int II = start; II < end; II++){
 		status = I2C_WRITE(PCT2075addr[II], (uint8_t [2]){0x01, 0b00000000}, 2); // Normal reading mode
-		if(status) return status;
+		if ( status ) error = status;
 		status = I2C_WRITE(PCT2075addr[II], (uint8_t [2]){0x04, 0b00000001}, 2); // Period to measure temperature = 100 ms
-		if(status) return status;
+		if ( status ) error = status;
 	}
 	
 	// TMP006
-	for(int II=0; II < (sizeof(TMP006addr)/sizeof(uint8_t)); II++){
+	if ( index == 0 ) {start = 0; end = TMP006addr_len;}
+	else if ( (index > (MCP9801addr_len + PCT2075addr_len)) && ((index - MCP9801addr_len - PCT2075addr_len - 1) < TMP006addr_len) ) {start = index - MCP9801addr_len - PCT2075addr_len - 1; end = index - MCP9801addr_len - PCT2075addr_len;}
+	else {start = 0; end = 0;}
+	for(int II = start; II < end; II++){
 		status = I2C_WRITE(TMP006addr[II], (uint8_t [3]){0x02, 0x74, 0}, 3);
-		if(status) return status;
+		if ( status ) error = status;
 	}
 	
-	
-	return OK;
+	return error;
 }
-int GetTemperatureMCP9801(int sensor_index, int16_t * temperature_128){	
+int GetTemperatureMCP9801(int sensor_index, int16_t * temperature_128)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | TEMP_SENSORS_GETMCP9801_CODE;	
 	
 	// Check index
-	if(sensor_index >= (sizeof(MCP9801addr)/sizeof(uint8_t))) return SENSOR_INDEX_OOB;
+	if(sensor_index >= (sizeof(MCP9801addr)/sizeof(uint8_t))) return TEMP_SENSORS_INDEX_OOB;
 	
 	uint8_t read_data[2];
 	
@@ -816,10 +941,12 @@ int GetTemperatureMCP9801(int sensor_index, int16_t * temperature_128){
 	
 	return OK;
 }
-int GetTemperaturePCT2075(int sensor_index, int16_t * temperature_128){	
+int GetTemperaturePCT2075(int sensor_index, int16_t * temperature_128)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | TEMP_SENSORS_GETPCT2075_CODE;	
 	
 	// Check index
-	if(sensor_index >= (sizeof(PCT2075addr)/sizeof(uint8_t))) return SENSOR_INDEX_OOB;
+	if(sensor_index >= (sizeof(PCT2075addr)/sizeof(uint8_t))) return TEMP_SENSORS_INDEX_OOB;
 	
 	uint8_t read_data[2];
 	
@@ -833,9 +960,12 @@ int GetTemperaturePCT2075(int sensor_index, int16_t * temperature_128){
 	
 	return OK;
 }
-int GetTemperatureTMP006(int sensor_index, int16_t * temperature_128){
+int GetTemperatureTMP006(int sensor_index, int16_t * temperature_128)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | TEMP_SENSORS_GETTMP006_CODE;
+	
 	// Check index
-	if(sensor_index >= (sizeof(TMP006addr)/sizeof(uint8_t))) return SENSOR_INDEX_OOB;
+	if(sensor_index >= (sizeof(TMP006addr)/sizeof(uint8_t))) return TEMP_SENSORS_INDEX_OOB;
 	
 	uint8_t read_data[2];
 	
@@ -866,11 +996,11 @@ int GetTemperatureTMP006(int sensor_index, int16_t * temperature_128){
 	return OK;
 }
 
-/*--------------------------------------------------
-                     EXT EEPROM
---------------------------------------------------*/
+//---------------------------------------------------------------------------------------
+//					                     EXT EEPROM
+//---------------------------------------------------------------------------------------
 // ADDRESSES OF EEPROM
-const char EXT_EEPROM_ADDR[1] = {0xA0};
+uint8_t EXT_EEPROM_ADDR[1] = {0xA0};
 
 // PARAMETERS
 #define EXT_EEPROM_MAX_ADDR 16383 //maximum number of addresses
@@ -878,12 +1008,26 @@ const char EXT_EEPROM_ADDR[1] = {0xA0};
 
 // ENUM
 enum ext_eeprom{
-	EXT_EEPROM_WRONG_ADDR = 181,
+	EXT_EEPROM_INIT_CODE = 181,
+	EXT_EEPRON_READ_CODE,
+	EXT_EEPROM_GETSIZE_CODE,
+	EXT_EEPROM_WRITE_CODE,
+	
+	EXT_EEPROM_WRONG_ADDR,
 	EXT_EEPROM_OVERFLOW
 	};
 
 // FUNCTIONS
-int ReadCodeinEEPROM(uint32_t eeprom_SLA_index, uint16_t eeprom_address, uint8_t * byte){
+int EXT_EEPROM_INIT(void)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_INIT_CODE;
+	
+	// TODO: EEPROM_INIT
+	return OK;
+}
+int ReadCodeinEEPROM(uint32_t eeprom_SLA_index, uint16_t eeprom_address, uint8_t * byte)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPRON_READ_CODE;	
 	
 	// CHECK THE ADDRESS IS CORRECT
 	if(eeprom_SLA_index + (uint32_t)1 > (uint32_t)(sizeof(EXT_EEPROM_ADDR)/sizeof(char))) return EXT_EEPROM_WRONG_ADDR;
@@ -904,7 +1048,9 @@ int ReadCodeinEEPROM(uint32_t eeprom_SLA_index, uint16_t eeprom_address, uint8_t
 	
 	return OK;
 }
-int GetSizeofCode(uint32_t eeprom_SLA_index, int * len){
+int GetSizeofCode(uint32_t eeprom_SLA_index, uint32_t * len)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_GETSIZE_CODE;	
 	
 	// CHECK THE ADDRESS IS CORRECT
 	if(eeprom_SLA_index + (uint32_t)1 > (uint32_t)(sizeof(EXT_EEPROM_ADDR)/sizeof(char))) return EXT_EEPROM_WRONG_ADDR;
@@ -924,7 +1070,9 @@ int GetSizeofCode(uint32_t eeprom_SLA_index, int * len){
 	
 	return OK;
 }
-int WriteinEEPROM(uint32_t eeprom_SLA_index, uint8_t * buffer, uint16_t len){
+int WriteinEEPROM(uint32_t eeprom_SLA_index, uint8_t * buffer, uint16_t len)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_WRITE_CODE;	
 	
 	// CHECK THE ADDRESS IS CORRECT
 	if(eeprom_SLA_index + (uint32_t)1 > (uint32_t)(sizeof(EXT_EEPROM_ADDR)/sizeof(char))) return EXT_EEPROM_WRONG_ADDR;
@@ -963,9 +1111,9 @@ int WriteinEEPROM(uint32_t eeprom_SLA_index, uint8_t * buffer, uint16_t len){
 	return OK;
 }
 
-/*--------------------------------------------------
-                   WATCHDOG TIMER
---------------------------------------------------*/
+//---------------------------------------------------------------------------------------
+//				                      WATCHDOG TIMER
+//---------------------------------------------------------------------------------------
 int WATCHDOG_INIT(void){
 	cli(); // Disable interrupts
 	

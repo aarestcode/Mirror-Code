@@ -38,13 +38,15 @@ enum memory_enum
 	memory_EEPROM_CODE_ADDR,	  // W/R
 	
 	/* --------------- INTERFACES ---------------- */
-	memory_USART0_BAUD,           // R
-	memory_USART0_TX,             // R
-	memory_USART0_RX,             // R
+	memory_UART0_BAUD,           // R
+	memory_UART0_TX,             // R
+	memory_UART0_RX,             // R
+	memory_UART0_INDEX,			 // R
 	
-	memory_USART1_BAUD,           // R
-	memory_USART1_TX,             // R
-	memory_USART1_RX,             // R
+	memory_UART1_BAUD,           // R
+	memory_UART1_TX,             // R
+	memory_UART1_RX,             // R
+	memory_UART1_INDEX,			 // R
 	
 	memory_SPI_FREQ,              // R
 	memory_SPI_TX,                // R
@@ -163,7 +165,11 @@ enum memory_enum
 	memory_ELECTRODE39,           // W/R     //NOT IMPLEMENTED
 	memory_ELECTRODE40,           // W/R     //NOT IMPLEMENTED
 	memory_ELECTRODE41,           // W/R     //NOT IMPLEMENTED
-	memory_ELECTRODE42,           // W/R     //NOT IMPLEMENTED
+	
+	/* --------------- SCHEDULER ---------------- */
+	memory_ELECTRODE_ERROR,		  // W/R
+	memory_CURRENT_FUNCTION,	  // R
+	
 
 	memoryCOUNT //To count the number of variables to memorize
 };

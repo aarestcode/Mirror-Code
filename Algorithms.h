@@ -16,16 +16,24 @@
 #ifndef OK
 #define OK 0
 #endif
-/*--------------------------------------------------
-                PICOMOTORS ESTIMATION
---------------------------------------------------*/
+//--------------------------------------------------
+//                PICOMOTORS ESTIMATION
+//--------------------------------------------------
 // PARAMETERS
-int PosFineStepBoundaries[5] = {0,29,57,85,113}; // Only low bound of intervals
-int NegFineStepBoundaries[2] = {139,170}; // Only low bound of intervals
+uint16_t PosFineStepBoundaries[5] = {0,29,57,85,113}; // Only low bound of intervals
+uint16_t NegFineStepBoundaries[2] = {139,170}; // Only low bound of intervals
 
 // ERRORS ENUM
 enum picomotor_algorithm {
-	CURRENT_STATE_OOB = 201, 
+	PICOMOTOR_ESTIMATION_INIT_CODE = 201,
+	PICOMOTOR_ESTIMATION_ENCODERSTATEMONITOR_CODE,
+	PICOMOTOR_ESTIMATION_NUMTICKSCALC_CODE,
+	PICOMOTOR_ESTIMATION_MOVEINTERVALS_CODE,
+	PICOMOTOR_ESTIMATION_INITIALIZEPICO_CODE,
+	PICOMOTOR_ESTIMATION_CALIBRATEPICO_CODE,
+	PICOMOTOR_ESTIMATION_SETPICOLOCATION_CODE,
+	
+	CURRENT_STATE_OOB, 
 	PREVIOUS_STATE_OOB,
 	INCORRECT_STATE_CHANGE,
 	STATE_MONITOR_CRITICAL,
@@ -38,8 +46,10 @@ enum picomotor_algorithm {
 	};
 	
 // FUNCTIONS
-int PICOMOTOR_ESTIMATION_INIT(int max_ticks)
+int PICOMOTOR_ESTIMATION_INIT(uint32_t max_ticks)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_INIT_CODE;
+	
 	// Set size of encoder gaps
 	REGISTER[memory_ENCODER0_INTERVAL_SIZE] = 212; //nm
 	REGISTER[memory_ENCODER1_INTERVAL_SIZE] = 212; //nm
@@ -54,8 +64,10 @@ int PICOMOTOR_ESTIMATION_INIT(int max_ticks)
 	
 	return OK;
 }
-int EncoderStateMonitor(int current_state, int prev_state, int* update)
+int EncoderStateMonitor(uint8_t current_state, uint8_t prev_state, uint8_t* update)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_ENCODERSTATEMONITOR_CODE;
+	
 	// current_state = state00 or state10 or state11 or state01
 	// prev_state = state00 or state10 or state11 or state01
 	// OUTPUT = update = -1 (current state is one step down) or 0 (no change of state) or 1 (current state is one step up)
@@ -77,22 +89,24 @@ int EncoderStateMonitor(int current_state, int prev_state, int* update)
 	
 	return STATE_MONITOR_CRITICAL;
 }
-int NumTicksCalc(int index, int currentLocation, int desiredLocation, int* CoarseIntervals, int* FineSteps)
+int NumTicksCalc(int index, int32_t currentLocation, int32_t desiredLocation, int32_t* CoarseIntervals, int32_t* FineSteps)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_NUMTICKSCALC_CODE;
+	
 	// desiredLocation in nm (0 assumed to be the calibrated 0 at an interval limit)
 	// CorseIntervals = number of encoder intervals to move the picomotor (signed int)
 	// FineSteps = number of ticks to move the picomotor after the Coarse adjustment (signed int)
 	
-	int IntervalSize = REGISTER[memory_ENCODER0_INTERVAL_SIZE + index];
+	uint32_t IntervalSize = REGISTER[memory_ENCODER0_INTERVAL_SIZE + index];
 	
 	// Find which encoder interval is the desiredLocation
-	int desiredInterval = (int)desiredLocation/IntervalSize - (desiredLocation<0);
+	int32_t desiredInterval = (int32_t)desiredLocation/IntervalSize - (desiredLocation<0);
 	
 	// Find where within this previous interval is the desiredLocation
-	int desiredRemainder = desiredLocation % IntervalSize + IntervalSize*(desiredLocation<0);
+	int32_t desiredRemainder = desiredLocation % IntervalSize + IntervalSize*(desiredLocation<0);
 	
 	// Find current encoder interval
-	int currentInterval = (int)currentLocation/IntervalSize;
+	int32_t currentInterval = (int32_t)currentLocation/IntervalSize;
 
 	// Calculate the CoarseIntervals from the currentInterval and the desiredRemainder
 	// Calculate FineSteps from desiredRemainder
@@ -102,10 +116,10 @@ int NumTicksCalc(int index, int currentLocation, int desiredLocation, int* Coars
 		*CoarseIntervals = desiredInterval - currentInterval - 1;
 		
 		// Size of PosFineStepBoundaries
-		int sizeP = sizeof(PosFineStepBoundaries)/sizeof(PosFineStepBoundaries[0]);
+		uint8_t sizeP = sizeof(PosFineStepBoundaries)/sizeof(PosFineStepBoundaries[0]);
 		
 		// Compare the remainder to boundaries
-		for (int II=sizeP-1; II >= 0; II--)
+		for (uint8_t II=sizeP-1; II >= 0; II--)
 		{
 			if(desiredRemainder >= PosFineStepBoundaries[II])
 			{
@@ -124,10 +138,10 @@ int NumTicksCalc(int index, int currentLocation, int desiredLocation, int* Coars
 		*CoarseIntervals = desiredInterval - currentInterval + 1;
 		
 		// Size of NegFineStepBoundaries
-		int sizeN = sizeof(NegFineStepBoundaries)/sizeof(NegFineStepBoundaries[0]);
+		uint8_t sizeN = sizeof(NegFineStepBoundaries)/sizeof(NegFineStepBoundaries[0]);
 		
 		// Compare the remainder to boundaries
-		for (int II=sizeN-1; II >= 0; II--)
+		for (uint8_t II=sizeN-1; II >= 0; II--)
 		{
 			if(desiredRemainder >= NegFineStepBoundaries[II])
 			{
@@ -145,8 +159,10 @@ int NumTicksCalc(int index, int currentLocation, int desiredLocation, int* Coars
 	return OK;	
 	
 }
-int MoveIntervals(int index, int CoarseIntervals, int* MovedIntervals, int* MovedTicks)
+int MoveIntervals(int index, int32_t CoarseIntervals, int32_t* MovedIntervals, int32_t* MovedTicks)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_MOVEINTERVALS_CODE;
+	
 	// index = 0 or 1 or 2 (index of picomotor)
 	// CoarseIntervals = number of encoder intervals to move the picomotor (signed int)
 	// MovedIntervals = OUTPUT actual number of intervals moved by the function. Should be equal to CoarseIntervals if everything went fine
@@ -155,26 +171,26 @@ int MoveIntervals(int index, int CoarseIntervals, int* MovedIntervals, int* Move
 	int error = 0;
 	
 	// Get the direction
-	int dir;
+	int8_t dir;
 	if(CoarseIntervals > 0) dir = 1;
 	else if(CoarseIntervals < 0) dir = -1;
 	else return OK; //No need to move
 	
 	// Get current state of encoders
-	int prev_state, current_state;
+	uint8_t prev_state, current_state;
 	error = GetEncoderState(index, &current_state);
 	if(error) return error;
 	
 	// Loop
 	*MovedIntervals = 0;
 	*MovedTicks = 0;
-	int update = 0;
-	for (int II=0; II < abs(CoarseIntervals); II++)
+	uint8_t update = 0;
+	for (uint32_t II=0; II < abs(CoarseIntervals); II++)
 	{
 		// Update previous state for next interval
 		prev_state = current_state; 
 		// Count the number of ticks
-		int ticks_count=0;
+		uint32_t ticks_count=0;
 		
 		// Actuate while a new state is not reached
 		do
@@ -207,6 +223,8 @@ int MoveIntervals(int index, int CoarseIntervals, int* MovedIntervals, int* Move
 }
 int InitializePicomotor(int index, bool limit)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_INITIALIZEPICO_CODE;
+	
 	// index = 0 or 1 or 2 (index of picomotor)
 	// limit = 0 (initialize to closest lower encoder inteval switch) or 1 (initialize to soft switch)
 	
@@ -214,8 +232,10 @@ int InitializePicomotor(int index, bool limit)
 	
 	return OK;
 }
-int CalibratePicomotor(int index, signed int intervals, float* mean, float* std)
+int CalibratePicomotor(int index, int16_t intervals, float* mean, float* std)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_CALIBRATEPICO_CODE;
+	
 	// index = 0 or 1 or 2 (index of picomotor)
 	// intervals = number of intervals to use for calibration (the more the better/the longer)
 	// mean = OUTPUT mean of an actuation tick (this value converges quickly to its true value. No need for a large "intervals" input)
@@ -224,17 +244,17 @@ int CalibratePicomotor(int index, signed int intervals, float* mean, float* std)
 	int error;
 	
 	// The calculation of the mean and standard deviation of one actuation is calculated from aggregating the results of "sqrt(intervals)" intervals
-	int dir; 
+	int8_t dir; 
 	if(intervals>=0) dir = 1;
 	if(intervals<0) dir = -1;
 	
 	// To calculate the mean and std, we need the sum and the sum of squares
-	long sum_ticks = 0;
-	long sum_ticks_squared = 0;
+	uint32_t sum_ticks = 0;
+	uint32_t sum_ticks_squared = 0;
 	
 	// Get data
-	int MovedIntervals, MovedTicks;
-	for(int II=0; II<abs(intervals); II++)
+	int32_t MovedIntervals, MovedTicks;
+	for(int16_t II=0; II<abs(intervals); II++)
 	{
 		// Move the desired amount of intervals
 		error = MoveIntervals(index, dir, &MovedIntervals, &MovedTicks);
@@ -250,8 +270,10 @@ int CalibratePicomotor(int index, signed int intervals, float* mean, float* std)
 		
 	return OK;
 }
-int SetPicomotorLocation(int index, int currentLocation, int desiredLocation)
+int SetPicomotorLocation(int index, int32_t currentLocation, int32_t desiredLocation)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_SETPICOLOCATION_CODE;
+	
 	// INPUT index = 0 or 1 or 2 (index of picomotor)
 	// INPUT currentLocation in nm (0 assumed to be the calibrated 0 at an interval limit)
 	// INPUT desiredLocation in nm (0 assumed to be the calibrated 0 at an interval limit)
@@ -259,12 +281,12 @@ int SetPicomotorLocation(int index, int currentLocation, int desiredLocation)
 	int error = 0;
 	
 	// Get the number of Coarse intervals to go and the fine steps
-	int CoarseIntervals, FineSteps;
+	int32_t CoarseIntervals, FineSteps;
 	error = NumTicksCalc(index, currentLocation,desiredLocation,&CoarseIntervals,&FineSteps);
 	if(error) return error;
 	
 	// Move the coarse intervals
-	int MovedIntervals, MovedTicks;
+	int32_t MovedIntervals, MovedTicks;
 	error = MoveIntervals(index, CoarseIntervals, &MovedIntervals, &MovedTicks);
 	if(error) return error;
 	
@@ -294,15 +316,22 @@ int SetPicomotorLocation(int index, int currentLocation, int desiredLocation)
 	return OK;
 }
 
-
-/*--------------------------------------------------
-                ELECTRODE ACTUATION
---------------------------------------------------*/
+//--------------------------------------------------
+//                ELECTRODE ACTUATION
+//--------------------------------------------------
 #define N_electrodes 41 //Number of electrodes
+int Actuation_ON = 0;
 int ActuateElectrode(int channel);
+
+enum electrode_algorithm {
+	ELECTRODE_ACTUATION_INIT_CODE = 221,
+	ELECTRODE_ACTUATION_ACTUATE_CODE
+};
 
 int ELECTRODE_ACTUATION_INIT(void)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | ELECTRODE_ACTUATION_INIT_CODE;
+	
 	// Set times
 	REGISTER[memory_HV_TIMER] = 10; // Time for HV to stabilize [ms]
 	
@@ -338,9 +367,10 @@ int ELECTRODE_ACTUATION_INIT(void)
 		for (int ch=0; ch < N_electrodes; ch++){
 			REGISTER[memory_ELECTRODE1+ch] = ((long)10<<24) | ((long)10<<16) | (volt & 0xffff);
 			error = ActuateElectrode(ch); // Should go very quickly since the voltage is already set
-			if(error) return error;
 		}
+		if(error) return error;
 	}
+	
 	error = SetBias(REGISTER[memory_HV_BIAS]);
 	if(error) return error;
 	
@@ -352,15 +382,20 @@ int ELECTRODE_ACTUATION_INIT(void)
 	for (int ch=0; ch < N_electrodes; ch++){
 		REGISTER[memory_ELECTRODE1+ch] = ((long)10<<24) | ((long)10<<16) | (REGISTER[memory_HV_BIAS] & 0xffff);
 		error = ActuateElectrode(ch); // Should go very quickly since the voltage is already set
-		if(error) return error;
 	}
+	if(error) return error;
+	
+	Actuation_ON = 1;
 	
 	return OK;
 }
 int ActuateElectrode(int channel){
-	int status;
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | ELECTRODE_ACTUATION_ACTUATE_CODE;
 	
 	unsigned int memory_address = memory_ELECTRODE1 + channel;
+	if ( REGISTER[memory_address] == 0 ) return OK;
+	
+	int status;
 	
 	// 1. Check voltage
 	uint16_t limit = (uint16_t)REGISTER[memory_ELECTRODE_LIMIT_V];
@@ -378,23 +413,513 @@ int ActuateElectrode(int channel){
 	// 2. Set desired voltage
 	if (voltage != REGISTER[memory_HV]){
 		status = SetVoltage(voltage);  // Set DAC value
-		if(status) return status;
+		if(status) {
+			REGISTER[memory_ELECTRODE_ERROR] = (REGISTER[memory_ELECTRODE_ERROR] << 8) | status;
+			return status;
+		}
 		_delay_ms(REGISTER[memory_HV_TIMER]);
 	}
 	
 	// 3. Turn channel on
 	status = ChannelOn(channel);  // Start charging channel
-	if(status) return status;
+	if(status) {
+		REGISTER[memory_ELECTRODE_ERROR] = (REGISTER[memory_ELECTRODE_ERROR] << 8) | status;
+		return status;
+	}
 	
 	// 4. Charge electrode
 	_delay_ms((REGISTER[memory_address] >> 24) & 0xff);
 	
 	// 5. Turn channel off
 	status = ChannelOff(channel);
-	if(status) return status;
+	if(status) {
+		REGISTER[memory_ELECTRODE_ERROR] = (REGISTER[memory_ELECTRODE_ERROR] << 8) | status;
+		return status;
+	}
 	
 	// 6. Update timer in electrode data
 	REGISTER[memory_address] = ((REGISTER[memory_address] & 0xff0000) << 8) | (REGISTER[memory_address] & 0xffffff);
+	
+	return OK;
+}
+
+//--------------------------------------------------
+//                COMMAND PARSING
+//--------------------------------------------------
+
+int ParseCommand(int port)
+{
+	//--------------------------------------------------
+    //                 MESSAGE CHECK
+	//--------------------------------------------------
+	uint8_t command;
+	int32_t data;
+	uint16_t checksum;
+	if (CheckMessage(port, &command, &data, &checksum)){
+		if ( port == 1 ) return SendFeedback(port,253,((uint32_t)REGISTER[memory_UART0_INDEX] << 24) | ((uint32_t)command << 16) | checksum);
+		if ( port == 2 ) return SendFeedback(port,253,((uint32_t)REGISTER[memory_UART1_INDEX] << 24) | ((uint32_t)command << 16) | checksum);
+	}	
+
+	//--------------------------------------------------
+    //                       PRIVATE
+	//--------------------------------------------------
+	// command = 0
+	if (command	== 0){
+		int error = SendFeedback(port,0,0xAA12e570); //Send back AAReST written in Hex
+		if(error) return error;
+	}
+
+	/*--------------------------------------------------
+                       REGISTER WRITE
+	--------------------------------------------------*/
+	// command = 1 to memoryCOUNT
+	else if (command < memoryCOUNT)
+	{	
+		REGISTER[command] = data;
+		int error = SendFeedback(port,command,0);
+		if(error) return error;	
+	}
+
+	/*--------------------------------------------------
+                       REGISTER READ
+	--------------------------------------------------*/
+	// command = 150
+	else if(command == 150){
+		int error = SendFeedback(port,data,REGISTER[data]);
+		if(error) return error;
+	}
+	
+	/*--------------------------------------------------
+                          ACTIONS
+	--------------------------------------------------*/
+	// command = 151-239
+	
+	// RE-INITIALIZE UART0
+	else if (command==151){
+		int status = UART0_INIT(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE UART1
+	else if (command==152){
+		int status = UART1_INIT(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE SPI
+	else if (command==153){
+		int status = SPI_INIT(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE I2C
+	else if (command==154){
+		int status = I2C_INIT(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// TEST I2C
+	else if (command==155){
+		int status = I2C_WRITE(data, (uint8_t [0]){}, 0);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE ADC
+	else if (command==156){
+		int status = ADC_INIT(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE COMMUNICATIONS
+	else if (command==157){
+		int status = COMMUNICATION_INIT(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE POWER
+	else if (command==160){
+		int status = POWER_INIT();
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// ACTIVATE ELECTRODE HV
+	else if (command==161){
+		int status = ActivateHV();
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// DEACTIVATE ELECTRODE HV
+	else if (command==162){
+		int status = DeactivateHV();
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// ACTIVATE PICOMOTOR HV
+	else if (command==163){
+		int status = ActivatePICOV(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// DEACTIVATE PICOMOTOR HV
+	else if (command==164){
+		int status = DeactivatePICOV();
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// CHANGE VARIABLE HV
+	else if (command==165){
+		int status = SetVoltage(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// CHANGE BIAS HV
+	else if (command==166){
+		int status = SetBias(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// ENABLE SUPPLY VOLTAGE
+	else if (command==167){
+		int status = EnableSV(data,true);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// DISABLE SUPPLY VOLTAGE
+	else if (command==168){
+		int status = EnableSV(data,false);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// ENABLE CURRENT LIMITER
+	else if (command==169){
+		int status = EnableCL(data,true);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// DISABLE CURRENT LIMITER
+	else if (command==170){
+		int status = EnableCL(data,false);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// MEASURE FB VOLTAGE
+	else if (command==171){
+		uint16_t val;
+		int status = MeasureV(data,&val);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// CURRENT LIMITER FAULT
+	else if (command==172){
+		int status = IsCLFault(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE SEPERATION DEVICE
+	else if (command==175){
+		int status = SEP_DEV_INIT();
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RELEASE SEPERATION DEVICE
+	else if (command==176){
+		int status = ReleaseMirror(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// SEPERATION DEVICE OFF
+	else if (command==177){
+		int status = IsMirrorConstrained();
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE PICOMOTORS DRIVER
+	else if (command==179){
+		int status = PICOMOTORS_INIT();
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE PICOMOTORS ESTIMATION ALGORITHM
+	else if (command==180){
+		int status = PICOMOTOR_ESTIMATION_INIT(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// LEFT PICOMOTOR
+	else if(command==181){ // MOVE BY TICKS
+		int status = MovePicomotor(0,data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==182){ // MOVE BY INTERVALS
+		int32_t MovedIntervals, MovedTicks;
+		int status = MoveIntervals(0, data, &MovedIntervals, &MovedTicks);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==183){ // MOVE BY NM (THROUGH ALGORITHM)
+		int status = SetPicomotorLocation(0, REGISTER[memory_PICO0_LOCATION], data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==184){ // INITIALIZE
+		int status = InitializePicomotor(0, data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==185){ // CALIBRATE
+		float mean, std;
+		int status = CalibratePicomotor(0, data, &mean, &std);
+		if(!status){
+			REGISTER[memory_PICO0_MEAN] =  (int32_t)(mean*1000000);
+			REGISTER[memory_PICO0_STD] =  (int32_t)(  std*1000000);
+		}
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==186){ // MEASURE ENCODER STATE
+		uint8_t state;
+		int status = GetEncoderState(0, &state);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RIGHT PICOMOTOR
+	else if(command==191){ // MOVE BY TICKS
+		int status = MovePicomotor(1,data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==192){ // MOVE BY INTERVALS
+		int32_t MovedIntervals, MovedTicks;
+		int status = MoveIntervals(1, data, &MovedIntervals, &MovedTicks);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==193){ // MOVE BY NM (THROUGH ALGORITHM)
+		int status = SetPicomotorLocation(1, REGISTER[memory_PICO1_LOCATION], data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==194){ // INITIALIZE
+		int status = InitializePicomotor(1, data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==195){ // CALIBRATE
+		float mean, std;
+		int status = CalibratePicomotor(1, data, &mean, &std);
+		if(!status){
+			REGISTER[memory_PICO1_MEAN] =  (int32_t)(mean*1000000);
+			REGISTER[memory_PICO1_STD] =  (int32_t)(std*1000000);
+		}
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==196){ // MEASURE ENCODER STATE
+		uint8_t state;
+		int status = GetEncoderState(1, &state);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// BOTTOM PICOMOTOR
+	else if(command==201){ // MOVE BY TICKS
+		int status = MovePicomotor(2,data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==202){ // MOVE BY INTERVALS
+		int32_t MovedIntervals, MovedTicks;
+		int status = MoveIntervals(2, data, &MovedIntervals, &MovedTicks);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==203){ // MOVE BY NM (THROUGH ALGORITHM)
+		int status = SetPicomotorLocation(2, REGISTER[memory_PICO2_LOCATION], data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==204){ // INITIALIZE
+		int status = InitializePicomotor(2, data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==205){ // CALIBRATE
+		float mean, std;
+		int status = CalibratePicomotor(2, data, &mean, &std);
+		if(!status) {
+			REGISTER[memory_PICO2_MEAN] = (int32_t)(mean*1000000);
+			REGISTER[memory_PICO2_STD] =  (int32_t)(std*1000000);
+		}
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	else if(command==206){ // MEASURE ENCODER STATE
+		uint8_t state;
+		int status = GetEncoderState(2, &state);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE MUX
+	else if (command==210){
+		int status = MULTIPLEXER_INIT(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// TURN CHANNEL ON
+	else if (command==211){ 
+		int status = ChannelOn(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	// TURN CHANNEL OFF
+	else if (command==212){ 
+		int status = ChannelOff(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE ELECTRODE ALGORITHM
+	else if (command==213){
+		int status = ELECTRODE_ACTUATION_INIT();
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// ACTUATE ELECTRODE
+	else if (command==214){
+		int status = ActuateElectrode(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE THERMO-SENSORS
+	else if (command==220){
+		int status = TEMP_SENSORS_INIT(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// MEASURE TEMP FROM MCP9801
+	else if(command==221){
+		int16_t temp;
+		int status = GetTemperatureMCP9801(data, &temp);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// MEASURE TEMP FROM TMP006
+	else if(command==222){
+		int16_t temp;
+		int status = GetTemperatureTMP006(data, &temp);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// RE-INITIALIZE WATCHDOG TIMER
+	else if (command==230){
+		int status = WATCHDOG_INIT();
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// DISABLE WATCHDOG TIMER
+	else if (command==231){
+		DisableWatchdogTimer();
+		int error = SendFeedback(port,command,0);
+		if(error) return error;
+	}
+	
+	/*--------------------------------------------------
+                       SPECIAL COMMANDS
+	--------------------------------------------------*/
+	// command = 240-255
+
+	// SAVE MEMORY
+	else if(command==240){
+		int status = SaveRegister(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+
+	// LOAD MEMORY
+	else if(command==241){
+		int status = LoadRegister(data);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// WRITE CODE TO EEPROM
+	else if(command==245){
+		uint16_t length = data & 0xffff;
+		uint32_t eeprom_index = data >> 16;
+		uint8_t buffer[length + 2];
+		buffer[0] = length >> 8;
+		buffer[1] = length;
+		int error = SendFeedback(port,command,0);
+		if(error) return error;	
+		
+		int status = LoadMessage(port, &(buffer[2]), length);
+		if(status==0) status = WriteinEEPROM(eeprom_index, buffer, length);
+		error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// GET SIZE OF CODE IN EEPROM
+	else if(command==246){
+		uint32_t length;
+		int status = GetSizeofCode(data, &length);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	// READ BYTE OF CODE IN EEPROM
+	else if(command==247){
+		uint8_t byte;
+		int status = ReadCodeinEEPROM(data>>16, data & 0xffff, &byte);
+		int error = SendFeedback(port,command,status);
+		if(error) return error;
+	}
+	
+	//PING
+	else if(command==255){
+		int error = SendFeedback(port,command,data);
+		if(error) return error;
+	}
+	
+	// WRONG COMMAND
+	else{
+		int error = SendFeedback(port,254,command);
+		if(error) return error;	
+	}
 	
 	return OK;
 }
