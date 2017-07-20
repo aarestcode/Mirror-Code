@@ -328,12 +328,12 @@ enum electrode_algorithm {
 	ELECTRODE_ACTUATION_ACTUATE_CODE
 };
 
-int ELECTRODE_ACTUATION_INIT(void)
+int ELECTRODE_ACTUATION_INIT(uint8_t measure_count)
 {
 	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | ELECTRODE_ACTUATION_INIT_CODE;
 	
 	// Set times
-	REGISTER[memory_HV_TIMER] = 10; // Time for HV to stabilize [ms]
+	REGISTER[memory_HV_TIMER] = 15; // Time for HV to stabilize [ms]
 	
 	// Set maximum voltage
 	REGISTER[memory_ELECTRODE_LIMIT_V] = 8088; // Limit (plus/minus) from bias
@@ -345,7 +345,7 @@ int ELECTRODE_ACTUATION_INIT(void)
 	REGISTER[memory_HV_BIAS] = 8191; // 8191 = +240V Bias
 		
 	// Turn on HV voltage
-	int error = ActivateHV();
+	int error = ActivateHV(measure_count);
 	if(error) return error;
 	
 	long volt;
@@ -465,7 +465,7 @@ int ParseCommand(int port)
 	//--------------------------------------------------
 	// command = 0
 	if (command	== 0){
-		int error = SendFeedback(port,0,0xAA12e570); //Send back AAReST written in Hex
+		int error = SendFeedback(port,0,0xAA12e57); //Send back AAReST written in Hex
 		if(error) return error;
 	}
 
@@ -552,7 +552,7 @@ int ParseCommand(int port)
 	
 	// ACTIVATE ELECTRODE HV
 	else if (command==161){
-		int status = ActivateHV();
+		int status = ActivateHV(data);
 		int error = SendFeedback(port,command,status);
 		if(error) return error;
 	}
@@ -809,7 +809,7 @@ int ParseCommand(int port)
 	
 	// RE-INITIALIZE ELECTRODE ALGORITHM
 	else if (command==213){
-		int status = ELECTRODE_ACTUATION_INIT();
+		int status = ELECTRODE_ACTUATION_INIT(data);
 		int error = SendFeedback(port,command,status);
 		if(error) return error;
 	}

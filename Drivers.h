@@ -261,7 +261,7 @@ int CheckMessage(int port, uint8_t * command, int32_t * data, uint16_t * checksu
 
 //PROTOTYPE
 int POWER_INIT(void);
-int ActivateHV(void);
+int ActivateHV(uint8_t measure_count);
 int DeactivateHV(void);
 int ActivatePICOV(bool withEncoders);
 int SetVoltage(uint16_t voltage);
@@ -286,7 +286,7 @@ enum power_driver{
 	POWER_ISCLFAULT_CODE,
 	
 	VAR_FEEDBACK_OOB,
-	GROUND_FEEDBACK_OOB,
+	BIAS_FEEDBACK_OOB,
 	PICOMOTOR_FEEDBACK_OOB,
 	BUSV_OOB,
 	BUSI_OOB,
@@ -336,7 +336,7 @@ int POWER_INIT(void)
 	
 	return OK;
 }
-int ActivateHV(void)
+int ActivateHV(uint8_t measure_count)
 {
 	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | POWER_ACTIVATEHV_CODE;
 	
@@ -347,11 +347,11 @@ int ActivateHV(void)
 	if(error) return error;
 	
 	// 2) Command variable HV to 0V
-	error = SetVoltage(0x3fff);
+	error = SetVoltage(0x3f00);
 	if(error) return error;	
 	
 	// 3) Command ground to 0V
-	error = SetBias(0x3fff);
+	error = SetBias(0x3f00);
 	if(error) return error;
 	
 	// 4) Enable 12V
@@ -367,7 +367,13 @@ int ActivateHV(void)
 	uint16_t val;
 	error = MeasureV(HV_VOLTAGE,&val);
 	if(error) return error;
-	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
+	uint8_t counter = 0;
+	while ( (abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) && (counter < measure_count) ) {
+		error = MeasureV(HV_VOLTAGE,&val);
+		if(error) return error;
+		counter++;
+	}
+	if ( counter == measure_count ){
 		// Disable CL3
 		error = EnableCL(CL3_E,false);
 		if(error) return error;
@@ -392,12 +398,18 @@ int ActivateHV(void)
 	_delay_ms(1500);
 	error = MeasureV(HV_GROUND,&val);
 	if(error) return error;
-	if(abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) {
+	counter = 0;
+	while ( (abs(val-TWO_FIVE_V) > REGISTER[memory_HV_TOL_V]) && ( counter < measure_count )) {
+		error = MeasureV(HV_GROUND,&val);
+		if(error) return error;
+		counter++;
+	}
+	if ( counter == measure_count ){
 		// Disable CL2
 		error = EnableCL(CL2_E,false);
 		if(error) return error;
 		
-		return GROUND_FEEDBACK_OOB;
+		return BIAS_FEEDBACK_OOB;
 	}
 	
 	// 10) Check CL2 //TODO
@@ -589,6 +601,7 @@ enum seperation_device{
 	SEP_DEV_INIT_CODE = 141,
 	SEP_DEV_RELEASE_CODE,
 	SEP_DEV_ISCONSTRAINED_CODE,
+	
 	SEPARATION_DEV_TIMEOUT
 };
 
@@ -646,6 +659,9 @@ uint8_t IOEaddr = 0x40; // Address of the IO Expander (LSB = 0 for WRITE operati
 uint8_t IOEport[3] = {0x12,0x13,0x13}; // Address of the port to which each picomotor is connected (pico1, pico2, pico3)
 uint8_t IOEpin[12] = {1,0,3,2,1,0,3,2,5,4,7,6}; // Pin of each port to which the switch is connected (pico1_FW_HIGH, pico1_FW_LOW, pico1_BW_HIGH, pico1_BW_LOW, ...)
 
+// ADG715
+uint8_t ENCODERSWITCHaddr = 0x90;
+
 // ENCODER PINSET
 #define DDR_ENCODER DDRC
 #define PIN_ENCODER PINC
@@ -701,6 +717,10 @@ int PICOMOTORS_INIT(void)
 
 	// Set PortB pins to 0
 	error = SPI_WRITE(SELECT_PICO,(uint8_t [3]){IOEaddr, 0x13, 0x00},3);
+	if (error) return error;
+	
+	// Encoder
+	error = I2C_WRITE(ENCODERSWITCHaddr, (uint8_t [1]){0}, 1); // Open all switches
 	if (error) return error;
 
 	return OK;
@@ -768,13 +788,15 @@ int GetEncoderState(int index, uint8_t* state)
 	
 	if( REGISTER[memory_ENCODER_SELECT] != index ){
 		//TODO: Select channel
+		int error = I2C_WRITE(ENCODERSWITCHaddr, (uint8_t [1]){3 << (2*index)}, 1);
+		if (error) return error;
 		REGISTER[memory_ENCODER_SELECT] = index;
 	}
 		
-	if ((PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = state11; *state = state11; return OK;}
-	if ((PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = state10; *state = state10; return OK;}
-	if (!(PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = state01; *state = state01; return OK;}
-	if (!(PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = state00; *state = state00; return OK;}
+	if ((PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 2 | state11; *state = state11; return OK;}
+	if ((PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 2 | state10; *state = state10; return OK;}
+	if (!(PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 2 | state01; *state = state01; return OK;}
+	if (!(PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 2 | state00; *state = state00; return OK;}
 	
 	return ENCODER_STATE_CRITICAL;
 }
@@ -859,7 +881,7 @@ int ChannelOff(uint8_t ch)
 // ADDRESSES OF SENSORS
 const uint8_t MCP9801addr[1] = {0x9E}; // const uint8_t MCP9801addr[2] = {0x9E, 0x92}; 
 const uint8_t PCT2075addr[0] = {}; // const uint8_t PCT2075addr[2] = {0x9E, 0x90}; 
-const uint8_t TMP006addr[1] = {0x8A}; //const uint8_t TMP006addr[3] = {0x80, 0x82, 0x8A};
+const uint8_t TMP006addr[3] = {0x80, 0x82, 0x8A};
 
 	
 // PARAMETERS
@@ -973,7 +995,7 @@ int GetTemperatureTMP006(int sensor_index, int16_t * temperature_128)
 	int status = I2C_READ(TMP006addr[sensor_index], (uint8_t [1]){0x01}, 1, read_data, 2);
 	if(status) return status;
 	
-	signed long data = (read_data[0]<<8) + read_data[1];
+	int16_t data = (read_data[0]<<8) + read_data[1];
 	double T_DIE = data / 128.0 + 273.15; // in Kelvin
 	
 	// EXTRACT V_SENSOR
@@ -990,7 +1012,7 @@ int GetTemperatureTMP006(int sensor_index, int16_t * temperature_128)
 	double f = (V_SENSOR - V_OS) + 13.4*pow(V_SENSOR - V_OS,2);
 	double T_OBJ = pow(pow(T_DIE,4) + (f/S),0.25) - 273.15; // in Celsius
 	
-	REGISTER[memory_TEMP_TMP006_1+sensor_index] = T_OBJ*128;
+	REGISTER[memory_TEMP_TMP006_1+sensor_index] = (int32_t)(T_OBJ*128);
 	*temperature_128 = T_OBJ*128;
 	
 	return OK;

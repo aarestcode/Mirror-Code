@@ -87,9 +87,9 @@ enum memory_enum
 	memory_ENCODER1_STATE,        // R
 	memory_ENCODER2_STATE,        // R
 	
-	memory_PICO0_TICKS,           // R
-	memory_PICO1_TICKS,           // R
-	memory_PICO2_TICKS,           // R
+	memory_PICO0_TICKS,           // W/R
+	memory_PICO1_TICKS,           // W/R
+	memory_PICO2_TICKS,           // W/R
 	
 	memory_MUX_ACTIVE_CH,         // R
 	
@@ -103,11 +103,11 @@ enum memory_enum
 	memory_EEPROM_CODE_BYTE,      // R
 	
 	/* --------------- ALGORITHMS ---------------- */
-	memory_PICO_MAX_TICKS_COUNT,  // R
+	memory_PICO_MAX_TICKS_COUNT,  // W/R
 	
-	memory_PICO0_LOCATION,        // R     //NOT IMPLEMENTED
-	memory_PICO1_LOCATION,        // R     //NOT IMPLEMENTED
-	memory_PICO2_LOCATION,        // R     //NOT IMPLEMENTED
+	memory_PICO0_LOCATION,        // W/R     //NOT IMPLEMENTED
+	memory_PICO1_LOCATION,        // W/R     //NOT IMPLEMENTED
+	memory_PICO2_LOCATION,        // W/R     //NOT IMPLEMENTED
 	
 	memory_ENCODER0_INTERVAL_SIZE,// W/R     //NOT IMPLEMENTED
 	memory_ENCODER1_INTERVAL_SIZE,// W/R     //NOT IMPLEMENTED
@@ -182,12 +182,17 @@ int32_t REGISTER[memoryCOUNT]; //Register vector in the RAM
 
 // ENUM
 enum int_eeprom{
-	INT_EEPROM_OVERLOAD = 1
+	SAVE_REGISTER_CODE = 1,
+	LOAD_REGISTER_CODE,
+	
+	INT_EEPROM_OVERLOAD
 	};
 
 // FUNCTIONS
 int SaveRegister(uint16_t eeprom_register)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | SAVE_REGISTER_CODE;
+
 	if(eeprom_register*memoryCOUNT*4 + memoryCOUNT*4 - 1 > INT_EEPROM_MAX_ADDR) return INT_EEPROM_OVERLOAD;
 	
 	/* Update the EEPROM memory with the current RAM memory */
@@ -196,6 +201,8 @@ int SaveRegister(uint16_t eeprom_register)
 }
 int LoadRegister(uint16_t eeprom_register)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | LOAD_REGISTER_CODE;
+
 	if(eeprom_register*memoryCOUNT*4 + memoryCOUNT*4 - 1 > INT_EEPROM_MAX_ADDR) return INT_EEPROM_OVERLOAD;
 	
 	/* Load the EEPROM memory to the RAM memory */

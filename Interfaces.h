@@ -138,7 +138,7 @@ int UART0_READ(uint8_t* var)
 void UART0_FLUSH(void)
 {
 	cli();
-	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | UART0_FLUSH_CODE;
+	//REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | UART0_FLUSH_CODE;
 	
 	unsigned char dummy;
 	while ( UCSR0A & (1<<RXC0) ) dummy = UDR0;
@@ -244,7 +244,7 @@ int UART1_READ(uint8_t* var)
 void UART1_FLUSH(void)
 {
 	cli();
-	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | UART1_FLUSH_CODE;
+	//REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | UART1_FLUSH_CODE;
 	
 	unsigned char dummy;
 	while ( UCSR1A & (1<<RXC1) ) dummy = UDR1;
