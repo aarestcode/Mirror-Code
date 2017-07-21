@@ -307,7 +307,6 @@ int POWER_INIT(void)
 
 	// Set Supply voltage enable as output
 	DDR_SV |= ((1<<FIVE_V_E) | (1<<TWELVE_V_E) | (1<<TWO_EIGHT_V_E));
-	PORT_SV &= ~((1<<FIVE_V_E) | (1<<TWELVE_V_E) | (1<<TWO_EIGHT_V_E));
 	
 	// Disable Supply Voltages
 	int error;
@@ -320,7 +319,6 @@ int POWER_INIT(void)
 	
 	// Set Current Limiters Enable as output
 	DDR_CL_E |= ((1<<CL1_E) | (1<<CL2_E) | (1<<CL3_E));
-	PORT_CL_E &= ~((1<<CL1_E) | (1<<CL2_E) | (1<<CL3_E));
 	
 	// Disable Current Limiters
 	error = EnableCL(CL1_E,false);
@@ -689,7 +687,6 @@ int PICOMOTORS_INIT(void)
 	
 	// Set Encoders as inputs
 	DDR_ENCODER &= ~((1<<ENCODERA) | (1<<ENCODERB));
-	// TODO: Set IO expander for encoder
 	
 	// Set CONFIGURATION bits to 0
 	error = SPI_WRITE(SELECT_PICO,(uint8_t [3]){IOEaddr, 0x0A, 0x00},3);
@@ -793,10 +790,10 @@ int GetEncoderState(int index, uint8_t* state)
 		REGISTER[memory_ENCODER_SELECT] = index;
 	}
 		
-	if ((PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 2 | state11; *state = state11; return OK;}
-	if ((PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 2 | state10; *state = state10; return OK;}
-	if (!(PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 2 | state01; *state = state01; return OK;}
-	if (!(PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 2 | state00; *state = state00; return OK;}
+	if ((PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 4 | state11; *state = state11; return OK;}
+	if ((PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 4 | state10; *state = state10; return OK;}
+	if (!(PIN_ENCODER & (1<<ENCODERA)) && (PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 4 | state01; *state = state01; return OK;}
+	if (!(PIN_ENCODER & (1<<ENCODERA)) && !(PIN_ENCODER & (1<<ENCODERB))) {REGISTER[memory_ENCODER0_STATE + index] = REGISTER[memory_ENCODER0_STATE + index] << 4 | state00; *state = state00; return OK;}
 	
 	return ENCODER_STATE_CRITICAL;
 }
