@@ -20,6 +20,8 @@ ISR(WDT_vect){
 
 int main(void)
 {	
+	LED_INIT();
+	
 	LoadRegister(0);
 
 	UART0_INIT(9600);

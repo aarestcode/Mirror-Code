@@ -444,6 +444,35 @@ int ActuateElectrode(int channel){
 }
 
 //--------------------------------------------------
+//               EEPROM PROGRAMMING
+//--------------------------------------------------
+enum eeprom_prog {
+	EEPROM_PROG_SAVE = 231
+};
+int SaveApplicationFromCameraToEEPROM(int port, CodeID_t CodeID, uint8_t Npages){
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EEPROM_PROG_SAVE;
+
+	uint8_t buffer[SPM_PAGESIZE];
+	int status;
+	
+	// Save size of code
+	status = WriteCodeInfoinEEPROM(CodeID, Npages);
+	if(status) return status;
+	
+	for (int II = 0; II < Npages; II++){
+		SendFeedback(port,245,0); // Trigger the camera to send a page
+		
+		status = LoadData(port, buffer, SPM_PAGESIZE);
+		if(status) return status;
+		
+		status = WritePageInEEPROM(CodeID, II, buffer);
+		if(status) return status;
+	}
+	
+	return OK;
+}
+
+//--------------------------------------------------
 //                COMMAND PARSING
 //--------------------------------------------------
 
@@ -879,40 +908,35 @@ int ParseCommand(int port)
 	
 	// WRITE CODE TO EEPROM
 	else if(command==245){
-		uint16_t length = data & 0xffff;
-		uint32_t eeprom_index = data >> 16;
-		uint8_t buffer[length + 2];
-		buffer[0] = length >> 8;
-		buffer[1] = length;
-		int error = SendFeedback(port,command,0);
-		if(error) return error;	
-		
-		int status = LoadMessage(port, &(buffer[2]), length);
-		if(status==0) status = WriteinEEPROM(eeprom_index, buffer, length);
-		error = SendFeedback(port,command,status);
+		uint8_t Npages = data & 0xffff;
+		CodeID_t CodeID = data >> 16;
+		int status =  SaveApplicationFromCameraToEEPROM(port, CodeID, Npages);
+		int error = SendFeedback(port,command,status);
 		if(error) return error;
 	}
 	
 	// GET SIZE OF CODE IN EEPROM
 	else if(command==246){
-		uint32_t length;
-		int status = GetSizeofCode(data, &length);
+		uint8_t Npages;
+		int status = GetSizeofCode(data, &Npages);
 		int error = SendFeedback(port,command,status);
 		if(error) return error;
 	}
 	
-	// READ BYTE OF CODE IN EEPROM
+	// READ DWORD OF CODE IN EEPROM
 	else if(command==247){
-		uint8_t byte;
-		int status = ReadCodeinEEPROM(data>>16, data & 0xffff, &byte);
+		uint32_t dword;
+		int status = ReadDWordFromEEPROM(data>>16, data & 0xffff, &dword);
 		int error = SendFeedback(port,command,status);
 		if(error) return error;
 	}
 	
 	//PING
 	else if(command==255){
-		int error = SendFeedback(port,command,data);
+		int error = SendFeedback(port,command,0);
 		if(error) return error;
+		REGISTER[memory_BOOT_SAFE] = 0;
+		SaveRegisterValue(0, memory_BOOT_SAFE);
 	}
 	
 	// WRONG COMMAND

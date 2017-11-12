@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <avr/interrupt.h>
 #include <avr/wdt.h>
+#include <avr/pgmspace.h>
 
 #ifndef OK
 #define OK 0
@@ -35,7 +36,7 @@ unsigned char Feedback[MessageN]; //Vector of transmitted bytes
 enum communication{
 	COMMUNICATION_INIT_CODE = 101,
 	COMMUNICATION_ISCOMMANDWAITING_CODE,
-	COMMUNICATION_LOADMESSAGE_CODE,
+	COMMUNICATION_LOADDATA_CODE,
 	COMMUNICATION_SENDFEEDBACK_CODE,
 	COMMUNICATION_CHECKMESSAGE_CODE,
 	
@@ -69,67 +70,21 @@ int IsCommandWaiting(void)
 	//REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | COMMUNICATION_ISCOMMANDWAITING_CODE;
 	
 	if(UART0_buffer_index >= (MessageN)){ // USB (priority)
-		//int ID = UART0_buffer_index / (MessageN) - 1;
-		//for ( int II = 0; II < (MessageN); II++) Message[II] = UART0_buffer[(MessageN) * ID + II];
-		//UART0_buffer_index -= (MessageN);
-		for ( int II = 0; II < (MessageN); II++) Message[II] = UART0_buffer[UART0_buffer_index - (MessageN) + II];
+		memcpy(Message, &UART0_buffer[UART0_buffer_index - (MessageN)], MessageN);
 		UART0_FLUSH();
 		sei();
+		REGISTER[memory_MESSAGE_COUNT0] ++;
 		return 1; 
 	}
 	if(UART1_buffer_index >= MessageN){ // XBee
-		//int ID = UART1_buffer_index / (MessageN) - 1;
-		//for ( int II = 0; II < (MessageN); II++) Message[II] = UART1_buffer[(MessageN) * ID + II];
-		//UART1_buffer_index -= (MessageN);
-		for ( int II = 0; II < (MessageN); II++) Message[II] = UART1_buffer[UART1_buffer_index - (MessageN) + II];
+		memcpy(Message, &UART1_buffer[UART1_buffer_index - (MessageN)], MessageN);
 		UART1_FLUSH();
 		sei();
+		REGISTER[memory_MESSAGE_COUNT1] ++;
 		return 2;
 	} 
 	
 	sei();
-	
-	return OK;
-}
-int LoadMessage(int port, uint8_t * buffer, uint16_t len)
-{
-	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | COMMUNICATION_LOADMESSAGE_CODE;
-	
-	//TODO: Redo using UART interrupt
-	
-	int error;
-	
-	//The message byte
-	uint8_t temp;
-	
-	if(port==1){			// USB
-		//Loop over the number of bytes to be received
-		for (int II = 0; II < len; II++)
-		{
-			error = UART0_READ(&temp);
-			if(error) {UART0_FLUSH(); return error;}
-
-			buffer[II] = temp;
-		}
-		
-		// Flush the rest to clear the buffers
-		UART0_FLUSH();
-	}
-	else if (port==2){		// XBee
-		//Loop over the number of bytes to be received
-		for (int II = 0; II < len; II++)
-		{
-			error = UART1_READ(&temp);
-			if(error) {UART1_FLUSH(); return error;}
-
-			buffer[II] = temp;
-		}
-		
-		// Flush the rest to clear the buffers
-		UART1_FLUSH();
-	}
-	else return COMMUNICATION_READ_PORT;
-	REGISTER[memory_MESSAGE_COUNT0 + port -1] ++;
 	
 	return OK;
 }
@@ -170,21 +125,20 @@ int SendFeedback(int port, uint8_t address, int32_t data)
 	
 	// Send
 	if (port==1){
-		for(II = 0; II < MessageN; II++)
-		{
+		for(II = 0; II < MessageN; II++){
 			error = UART0_WRITE(Feedback[II]);
 			if(error) return error;
 		}
+		REGISTER[memory_FEEDBACK_COUNT0]++;
 	}
 	else if (port==2){
-		for(II = 0; II < MessageN; II++)
-		{
+		for(II = 0; II < MessageN; II++){
 			error = UART1_WRITE(Feedback[II]);
 			if(error) return error;
 		}
+		REGISTER[memory_FEEDBACK_COUNT1]++;
 	}
 	else return COMMUNICATION_WRITE_PORT;
-	REGISTER[memory_MESSAGE_COUNT0 + port - 1] ++;
 
 	return OK;
 }
@@ -226,6 +180,28 @@ int CheckMessage(int port, uint8_t * command, int32_t * data, uint16_t * checksu
 	*data = 0;
 	for (int II = 0; II < (MessageDataN); II++)
 	*data |= ((int32_t)Message[(MessageCommandN)+II] << 8*((MessageDataN)-II-1));
+	
+	return OK;
+}
+int LoadData(int port, uint8_t * buffer, uint16_t numbytes)
+{
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | COMMUNICATION_LOADDATA_CODE;
+	cli(); // Could not make use of interrupt for unknown reason. So I;m doing it the old way.
+	
+	if (port == 1){
+		for (int II = 0; II < numbytes; II++) UART0_READ(&buffer[II]);
+		UART0_FLUSH();
+		sei();
+	}
+	else if (port == 2){
+		for (int II = 0; II < numbytes; II++) UART1_READ(&buffer[II]);
+		UART1_FLUSH();
+		sei();
+	}
+	else {
+		sei();
+		return COMMUNICATION_READ_PORT;
+	}
 	
 	return OK;
 }
@@ -892,7 +868,7 @@ enum temp_sensors{
 	TEMP_SENSORS_GETTMP006_CODE,
 	
 	TEMP_SENSORS_INDEX_OOB,
-	};
+};
 
 // FUNCTIONS
 int TEMP_SENSORS_INIT(uint8_t index)
@@ -1019,113 +995,73 @@ int GetTemperatureTMP006(int sensor_index, int16_t * temperature_128)
 //					                     EXT EEPROM
 //---------------------------------------------------------------------------------------
 // ADDRESSES OF EEPROM
-uint8_t EXT_EEPROM_ADDR[1] = {0xA0};
+const char EXT_EEPROM_ADDR = 0xA0;
 
 // PARAMETERS
-#define EXT_EEPROM_MAX_ADDR 16383 //maximum number of addresses
-#define EXT_EEPROM_PAGE_SIZE 64 //64 bytes per page
+#define EXT_EEPROM_PAGESIZE 256 //64 bytes per page
+typedef enum {
+	code0,
+	code1,
+	code2,
+	code3
+}CodeID_t;
 
 // ENUM
 enum ext_eeprom{
-	EXT_EEPROM_INIT_CODE = 181,
-	EXT_EEPRON_READ_CODE,
-	EXT_EEPROM_GETSIZE_CODE,
-	EXT_EEPROM_WRITE_CODE,
-	
-	EXT_EEPROM_WRONG_ADDR,
-	EXT_EEPROM_OVERFLOW
-	};
+	EXT_EEPROM_READ = 181,
+	EXT_EEPROM_SIZE,
+	EXT_EEPROM_WRITE_INFO,
+	EXT_EEPROM_WRITE_PAGE
+};
 
-// FUNCTIONS
-int EXT_EEPROM_INIT(void)
-{
-	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_INIT_CODE;
+int ReadDWordFromEEPROM(CodeID_t CodeID, uint16_t addr, uint32_t * dword){
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_READ;
+
+	uint8_t byte_addr[2] = {(addr >> 8) + 1, addr & 0xFF};
+	uint8_t bytes[4] = {};
+	int status = I2C_READ(EXT_EEPROM_ADDR + (CodeID<<1), byte_addr, 2, bytes, 4);
+	if(status) return status;
 	
-	// TODO: EEPROM_INIT
+	*dword = (((uint32_t)bytes[3]) << 24) + (((uint32_t)bytes[2]) << 16) + (((uint32_t)bytes[1]) << 8) + ((uint32_t)bytes[0]);
+	REGISTER[memory_EEPROM_CODE_DWORD] = (uint32_t)*dword;
+		
 	return OK;
 }
-int ReadCodeinEEPROM(uint32_t eeprom_SLA_index, uint16_t eeprom_address, uint8_t * byte)
-{
-	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPRON_READ_CODE;	
+int GetSizeofCode(CodeID_t CodeID, uint8_t * Npages){
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_SIZE;
 	
-	// CHECK THE ADDRESS IS CORRECT
-	if(eeprom_SLA_index + (uint32_t)1 > (uint32_t)(sizeof(EXT_EEPROM_ADDR)/sizeof(char))) return EXT_EEPROM_WRONG_ADDR;
-	
-	eeprom_address += 2; // Skip length bytes
-	// CHECK THAT THE EEPROM IS LARGE ENOUGH
-	if (eeprom_address > EXT_EEPROM_MAX_ADDR) return EXT_EEPROM_OVERFLOW;
-	
-	uint8_t byte_addr[2] = {eeprom_address>>8,eeprom_address};
+	uint8_t byte_addr[2] = {0,0};
 	uint8_t read_bytes[1];
-	int status = I2C_READ(EXT_EEPROM_ADDR[eeprom_SLA_index], byte_addr, 2, read_bytes, 1);
-	if(status) return status;
-	
-	
-	REGISTER[memory_EEPROM_CODE_BYTE] = (REGISTER[memory_EEPROM_CODE_BYTE]<<8) | (uint32_t)read_bytes[0];
-	
-	*byte = read_bytes[0];
-	
-	return OK;
-}
-int GetSizeofCode(uint32_t eeprom_SLA_index, uint32_t * len)
-{
-	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_GETSIZE_CODE;	
-	
-	// CHECK THE ADDRESS IS CORRECT
-	if(eeprom_SLA_index + (uint32_t)1 > (uint32_t)(sizeof(EXT_EEPROM_ADDR)/sizeof(char))) return EXT_EEPROM_WRONG_ADDR;
-	
-	uint16_t eeprom_page_address = 0; //Make sure we start at beginning of page
-	
-	// CHECK THAT THE EEPROM IS LARGE ENOUGH
-	if (eeprom_page_address + 1> EXT_EEPROM_MAX_ADDR) return EXT_EEPROM_OVERFLOW;
-	
-	uint8_t byte_addr[2] = {eeprom_page_address>>8,eeprom_page_address};
-	uint8_t read_bytes[2];
-	int status = I2C_READ(EXT_EEPROM_ADDR[eeprom_SLA_index], byte_addr, 2, read_bytes, 2);
+	int status = I2C_READ(EXT_EEPROM_ADDR + (CodeID<<1), byte_addr, 2, read_bytes, 1);
 	if(status) return status;
 
-	REGISTER[memory_EEPROM_CODE_LENGTH] = (read_bytes[0]<<8) + read_bytes[1];
-	*len = (read_bytes[0]<<8) + read_bytes[1];
+	*Npages = read_bytes[0];
+	REGISTER[memory_EEPROM_CODE_LENGTH] = (uint32_t)(*Npages);
 	
 	return OK;
 }
-int WriteinEEPROM(uint32_t eeprom_SLA_index, uint8_t * buffer, uint16_t len)
-{
-	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_WRITE_CODE;	
+int WriteCodeInfoinEEPROM(CodeID_t CodeID, uint8_t Npages){
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_WRITE_INFO;
 	
-	// CHECK THE ADDRESS IS CORRECT
-	if(eeprom_SLA_index + (uint32_t)1 > (uint32_t)(sizeof(EXT_EEPROM_ADDR)/sizeof(char))) return EXT_EEPROM_WRONG_ADDR;
+	uint8_t data[2 + 1];
+	data[0] = 0; // First page = code data
+	data[1] = 0;
+	data[2] = Npages;
 	
-	int status;
-	uint16_t eeprom_page_address = 0;
+	int status = I2C_WRITE(EXT_EEPROM_ADDR + (CodeID<<1), data, 2 + 1);
+	if(status) return status;
 	
-	// CHECK THAT THE EEPROM IS LARGE ENOUGH
-	if (eeprom_page_address + len - 1 > EXT_EEPROM_MAX_ADDR) return EXT_EEPROM_OVERFLOW;
+	return OK;
+}
+int WritePageInEEPROM(CodeID_t CodeID, uint8_t page, uint8_t buffer[EXT_EEPROM_PAGESIZE]){
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | EXT_EEPROM_WRITE_PAGE;
 	
-	// WRITE CODE
-	int page_num = ceil((double)len/EXT_EEPROM_PAGE_SIZE);
-	uint16_t page = eeprom_page_address & 0xFFC0; //Make sure we start at beginning of page
-	int word = 0;
-	
-	for(int II = 0; II < page_num; II++){
-		// FILL THE PAGE
-		uint8_t page_bytes[2+EXT_EEPROM_PAGE_SIZE];
-		page_bytes[0] = page >> 8;
-		page_bytes[1] = page;
-		
-		for (int III = 0; III < EXT_EEPROM_PAGE_SIZE; III++){
-			if(word < (int)len + 2) page_bytes[2+III] = buffer[word++];
-			else page_bytes[2+III] = 0xFF;
-		}
-		
-		// SEND PAGE
-		status = I2C_WRITE(EXT_EEPROM_ADDR[eeprom_SLA_index], page_bytes, 2+EXT_EEPROM_PAGE_SIZE);
-		if(status) return status;
-		_delay_ms(5); //delay for EEPROM to write the page
-		
-		// INCREMENT PAGE
-		page += EXT_EEPROM_PAGE_SIZE;
-	}
+	uint8_t data[2 + EXT_EEPROM_PAGESIZE];
+	data[0] = page + 1; // First page = code data
+	data[1] = 0;
+	memcpy(&(data[2]), buffer, EXT_EEPROM_PAGESIZE);
+	int status = I2C_WRITE(EXT_EEPROM_ADDR + (CodeID<<1), data, 2 + EXT_EEPROM_PAGESIZE);
+	if(status) return status;
 	
 	return OK;
 }

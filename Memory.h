@@ -35,6 +35,7 @@ enum memory_enum
 	memory_PRIVATE,
 	
 	/* ------------------ CODE ------------------- */
+	memory_BOOT_SAFE,
 	memory_EEPROM_CODE_ADDR,	  // W/R
 	
 	/* --------------- INTERFACES ---------------- */
@@ -100,8 +101,8 @@ enum memory_enum
 	memory_TEMP_TMP006_3,         // R
 	
 	memory_EEPROM_CODE_LENGTH,    // R
-	memory_EEPROM_CODE_BYTE,      // R
-	
+	memory_EEPROM_CODE_DWORD,     // R
+		
 	/* --------------- ALGORITHMS ---------------- */
 	memory_PICO_MAX_TICKS_COUNT,  // W/R
 	
@@ -183,7 +184,9 @@ int32_t REGISTER[memoryCOUNT]; //Register vector in the RAM
 // ENUM
 enum int_eeprom{
 	SAVE_REGISTER_CODE = 1,
+	SAVE_REGISTER_VALUE_CODE,
 	LOAD_REGISTER_CODE,
+	LOAD_REGISTER_VALUE_CODE,
 	
 	INT_EEPROM_OVERLOAD
 	};
@@ -199,6 +202,15 @@ int SaveRegister(uint16_t eeprom_register)
 	eeprom_update_block((const void*)REGISTER, (void*)(eeprom_register*memoryCOUNT*4), memoryCOUNT*4); //*4 because the vectors are made of 32 bits int (4 bytes)
 	return OK;
 }
+int SaveRegisterValue(uint16_t eeprom_register, uint16_t memory_ID){
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | SAVE_REGISTER_VALUE_CODE;
+
+	if(eeprom_register*memoryCOUNT*4 + memory_ID*4 + 3 > INT_EEPROM_MAX_ADDR) return INT_EEPROM_OVERLOAD;
+	
+	/* Update the EEPROM memory with the current RAM memory */
+	eeprom_update_block((const void*)&REGISTER[memory_ID], (void*)(eeprom_register*memoryCOUNT*4 + memory_ID*4), 4); //*4 because the vectors are made of 32 bits int (4 bytes)
+	return OK;
+}
 int LoadRegister(uint16_t eeprom_register)
 {
 	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | LOAD_REGISTER_CODE;
@@ -209,31 +221,14 @@ int LoadRegister(uint16_t eeprom_register)
 	eeprom_read_block((void*)REGISTER, (const void*)(eeprom_register*memoryCOUNT*4), memoryCOUNT*4); //*4 because the vectors are made of 32 bits int (4 bytes)
 	return OK;
 }
-
-/*--------------------------------------------------
-                    ERROR FILE 
---------------------------------------------------*/
-/*#define ERROR_VECTOR_SIZE 100 //100 lines in the error file
-#define ERROR_VECTOR_WARNING 90 //When the file reached 90 lines, a warning is sent to the camera CPU
-int ErrorCount = 0;
-
-// VECTORS DECLARATION
-uint32_t EEMEM	EEPROM_ERROR_VECTOR[ERROR_VECTOR_SIZE];
-uint32_t RAM_ERROR_VECTOR[ERROR_VECTOR_SIZE];
-
-// FUNCTIONS
-int SaveError(int error_code)
+int LoadRegisterValue(uint16_t eeprom_register, uint16_t memory_ID)
 {
-	// Function that saves the error code and return the error code so you can call "return SaveError(some_error_code)" 
-	
-	// Get time??
-	
-	// Save
-	RAM_ERROR_VECTOR[ErrorCount] = error_code;	
-	ErrorCount++;
-	
-	return error_code;
-}
-*/
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | LOAD_REGISTER_VALUE_CODE;
 
+	if(eeprom_register*memoryCOUNT*4 + memory_ID*4 + 3 > INT_EEPROM_MAX_ADDR) return INT_EEPROM_OVERLOAD;
+	
+	/* Load the EEPROM memory to the RAM memory */
+	eeprom_read_block((void*)&REGISTER[memory_ID], (const void*)(eeprom_register*memoryCOUNT*4 + memory_ID*4), 4); //*4 because the vectors are made of 32 bits int (4 bytes)
+	return OK;
+}
 #endif /* MEMORY_H_ */

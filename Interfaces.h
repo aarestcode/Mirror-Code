@@ -40,13 +40,18 @@ These functions are "independent" of the hardware (except for the pinsets and th
 #define PORT_LED PORTD
 #define LED PORTD7
 
-void BlinkLED(void){
+void LED_INIT(void){
 	DDR_LED |= (1<<LED);
-	_delay_ms(500);
-	PORT_LED |= (1<<LED);
-	_delay_ms(500);
 	PORT_LED &= ~(1<<LED);
-	
+}
+
+void SwitchLED(bool state){
+	if (state){
+		PORT_LED &= ~(1<<LED);
+	}
+	else{
+		PORT_LED |= (1<<LED);
+	} 
 }
 
 //--------------------------------------------------
@@ -58,7 +63,7 @@ void BlinkLED(void){
 
 // PARAMETERS
 uint8_t UART0_buffer[256];
-uint8_t UART0_buffer_index;
+uint16_t UART0_buffer_index;
 
 // PROTOTYPES
 int UART0_INIT(uint32_t USART_BAUDRATE);
@@ -150,8 +155,7 @@ void UART0_FLUSH(void)
 	sei();
 }
 ISR(USART0_RX_vect){
-	UART0_READ(&UART0_buffer[UART0_buffer_index]);
-	if(++UART0_buffer_index >= 256) UART0_buffer_index = 0;
+	UART0_READ(&UART0_buffer[UART0_buffer_index++]);
 	REGISTER[memory_UART0_INDEX] = UART0_buffer_index;
 }
 
@@ -164,7 +168,7 @@ ISR(USART0_RX_vect){
 
 // PARAMETERS
 uint8_t UART1_buffer[256];
-uint8_t UART1_buffer_index;
+uint16_t UART1_buffer_index;
 
 // PROTOTYPES
 int UART1_INIT(uint32_t USART_BAUDRATE);
@@ -257,8 +261,7 @@ void UART1_FLUSH(void)
 	sei();
 }
 ISR(USART1_RX_vect){
-	UART1_READ(&UART1_buffer[UART1_buffer_index]);
-	if(++UART1_buffer_index >= 256) UART1_buffer_index = 0;
+	UART1_READ(&UART1_buffer[UART1_buffer_index++]);
 	REGISTER[memory_UART1_INDEX] = UART1_buffer_index;
 }
 
