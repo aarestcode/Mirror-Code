@@ -21,6 +21,7 @@ ISR(WDT_vect){
 int main(void)
 {	
 	LED_INIT();
+	SwitchLED(true);
 	
 	LoadRegister(0);
 
@@ -39,7 +40,9 @@ int main(void)
 	TEMP_SENSORS_INIT(0);
 	
 	//PICOMOTOR_ESTIMATION_INIT(100);
-	//ELECTRODE_ACTUATION_INIT();
+	ELECTRODE_ACTUATION_INIT(50);
+		
+	SwitchLED(false);
 	
 	int ch = 0;
 	int port;
