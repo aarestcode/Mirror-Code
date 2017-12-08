@@ -1,563 +1,333 @@
 /*
- * FLIGHT_RM_V1.c
+ * SchedulerTestJune28.c
  *
- * Created: 6/14/2016 2:48:57 PM
- * Author : Thibaud
- * Note on May 2017: this is the original version, dated back to 2016. Latest version should check the algorithm branch.
- *
+ * Created: 6/28/2017 3:28:25 PM
+ * Author : WYC
  */ 
 
-#define F_CPU 8000000UL // CPU Frequency (IMPORTANT)
+/**
+AVR Watch dog test
+Hardware: ATMega8 running at 8MHz
+*/
+#define F_CPU 8000000UL // CPU Frequency (IMPORTANT), Have to define here.
 
 #include "Memory.h"
 #include "Interfaces.h"
 #include "Drivers.h"
 #include "Algorithms.h"
 
-int ParseCommand(int port)
+// Task Related 
+#define MAX_TASKS (0x10)
+#define RUNNABLE (0x00)
+#define RUNNING  (0x01)
+#define STOPPED  (0x02)
+#define ERROR    (0x03)
+#define REPEATABLE (0x01) // If the task can be run repeatedly
+
+// ActionCode
+#define Add_Task (0x00)
+#define Delete_Task (0x01)
+#define Get_Status (0x02)
+
+/**********************************************************************/
+// Definition of data structure, function prototypes
+/**********************************************************************/
+// Design a task "type": each task is a function. Pointer to a void function with no arguments
+typedef uint8_t (*task_t)(uint32_t);
+
+// basic task control block (TCB)
+typedef struct __tcb_t
 {
-	/*--------------------------------------------------
-                       MESSAGE CHECK
-	--------------------------------------------------*/
-	int II;
-	
-	// Checksum
-	if(MessageChecksumN)
+	uint8_t id; // task ID
+	task_t task; // pointer to the task function
+	// delay before execution
+	uint16_t delay, period;
+	uint8_t status; // status of task, i.e. health of task. Need to be updated at end of each execution.
+	uint32_t data; // data to be transfered to task function
+} tcb_t;
+
+// scheduler control functions
+void initScheduler(void);
+void addTask(uint8_t, task_t, uint8_t, uint32_t);
+void deleteTask(uint8_t);
+int getTaskStatus(uint8_t);
+void dispatchTasks(void);
+
+// prototypes of tasks
+uint8_t Task151(uint32_t);
+
+// Initialize the task list: data struct is shared globally
+tcb_t task_list[MAX_TASKS];
+
+// Reset number of timer interrupts every start
+uint16_t count = 0;
+
+/**********************************************************************/
+// Definition of functions used in scheduler
+/**********************************************************************/
+// Initializes the task list to the max number of tasks
+void initScheduler(void)
+{
+	for(uint8_t i=0; i<MAX_TASKS; i++)
 	{
-		unsigned int sum = 0;
-		for(II = 0; II < MessageN-MessageChecksumN; II++) sum += Message[II];
-		
-		unsigned int checksum = 0;
-		for (II = 0; II < MessageChecksumN; II++) checksum |= (Message[MessageCommandN+MessageDataN+II] << 8*(MessageChecksumN-II-1));
-		
-		sum += checksum;
-		
-		unsigned int mask = (1 << 8*MessageChecksumN) - 1;
-		checksum = sum & mask;
-		
-		if(checksum != mask)
+		task_list[i].id = 0; // Sending id 0 is illegal.
+		task_list[i].task = (task_t)0x00; // empty function pointer
+		task_list[i].delay = 0;
+		task_list[i].period = 0;
+		task_list[i].status = STOPPED;
+		task_list[i].data = 0x00;
+	}
+}
+
+// Adds a new task to the task list
+// scans through the list and places the new task data where it finds free space
+void addTask(uint8_t id, task_t task,  uint8_t period, uint32_t data)
+{
+	uint8_t idx = 0, done = 0x00;
+	
+	// First check if the task already exists and runnable; if so return. This is to prevent adding redundent task.
+	for (idx=0; idx < MAX_TASKS; idx++)
+	{
+		if(task_list[idx].id == id && (task_list[idx].status == RUNNABLE || task_list[idx].status == RUNNING)) return; // If the task id exist but status is stopped, then this task can be overwritten
+	}
+	
+	idx = 0;
+	
+	// As long as one task is stopped, it means its associated task in task list can be over written.
+	while( idx < MAX_TASKS )
+	{
+				
+		if( task_list[idx].status == STOPPED )
 		{
-			int error = SendFeedback(port,'C',checksum);
-			if(error) return error;
+			task_list[idx].id = id;
+			task_list[idx].task = task; // Assign the task function pointer
+			task_list[idx].delay = period;
+			task_list[idx].period = period;
+			task_list[idx].status = RUNNABLE;
+			task_list[idx].data = data;
+			done = 0x01;
 		}
-
-	}
-	
-	// Command
-	unsigned int command = 0;
-	for (II = 0; II < MessageCommandN; II++) command |= (Message[II] << 8*(MessageCommandN-II-1));
-	
-	// Data
-	signed long data = 0;
-	for (II = 0; II < MessageDataN; II++) data |= ((int32_t)Message[MessageCommandN+II] << 8*(MessageDataN-II-1));
-
-
-	/*--------------------------------------------------
-                           PRIVATE
-	--------------------------------------------------*/
-	// command = 0
-	if (command	== 0){
-		int error = SendFeedback(port,0,0xAA12e570); //Send back AAReST written in Hex
-		if(error) return error;
-	}
-
-	/*--------------------------------------------------
-                       REGISTER WRITE
-	--------------------------------------------------*/
-	// command = 1-149
-	else if (command < 150)
-	{	
-		REGISTER[command] = data;
-		int error = SendFeedback(port,command,0);
-		if(error) return error;	
-	}
-
-	/*--------------------------------------------------
-                       REGISTER READ
-	--------------------------------------------------*/
-	// command = 150
-	else if(command == 150){
-		int error = SendFeedback(port,data,REGISTER[data]);
-		if(error) return error;
-	}
-	
-	/*--------------------------------------------------
-                          ACTIONS
-	--------------------------------------------------*/
-	// command = 151-239
-	
-	// RE-INITIALIZE USART0
-	else if (command==151){
-		int status = USART0_INIT(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE USART1
-	else if (command==152){
-		int status = USART1_INIT(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE SPI
-	else if (command==153){
-		int status = SPI_INIT(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE I2C
-	else if (command==154){
-		int status = I2C_INIT(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE ADC
-	else if (command==155){
-		int status = ADC_INIT(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE COMMUNICATIONS
-	else if (command==156){
-		int status = COMMUNICATION_INIT(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE POWER
-	else if (command==160){
-		int status = POWER_INIT();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// ACTIVATE ELECTRODE HV
-	else if (command==161){
-		int status = ActivateHV();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// DEACTIVATE ELECTRODE HV
-	else if (command==162){
-		int status = DeactivateHV();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// ACTIVATE PICOMOTOR HV
-	else if (command==163){
-		int status = ActivatePICOV(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// DEACTIVATE PICOMOTOR HV
-	else if (command==164){
-		int status = DeactivatePICOV();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// CHANGE VARIABLE HV
-	else if (command==165){
-		int status = SetVoltage(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// CHANGE BIAS HV
-	else if (command==166){
-		int status = SetBias(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// ENABLE SUPPLY VOLTAGE
-	else if (command==167){
-		int status = EnableSV(data,true);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// DISABLE SUPPLY VOLTAGE
-	else if (command==168){
-		int status = EnableSV(data,false);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// ENABLE CURRENT LIMITER
-	else if (command==169){
-		int status = EnableCL(data,true);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// DISABLE CURRENT LIMITER
-	else if (command==170){
-		int status = EnableCL(data,false);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// MEASURE FB VOLTAGE
-	else if (command==171){
-		int val;
-		int status = MeasureV(data,&val);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// CURRENT LIMITER FAULT
-	else if (command==172){
-		int status = IsCLFault(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE SEPERATION DEVICE
-	else if (command==175){
-		int status = SEP_DEV_INIT();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RELEASE SEPERATION DEVICE
-	else if (command==176){
-		int status = ReleaseMirror(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// SEPERATION DEVICE OFF
-	else if (command==177){
-		int status = IsMirrorConstrained();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE PICOMOTORS DRIVER
-	else if (command==179){
-		int status = PICOMOTORS_INIT();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE PICOMOTORS ESTIMATION ALGORITHM
-	else if (command==180){
-		int status = PICOMOTOR_ESTIMATION_INIT(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// LEFT PICOMOTOR
-	else if(command==181){ // MOVE BY TICKS
-		int status = MovePicomotor(0,data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==182){ // MOVE BY INTERVALS
-		int MovedIntervals, MovedTicks;
-		int status = MoveIntervals(0, data, &MovedIntervals, &MovedTicks);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==183){ // MOVE BY NM (THROUGH ALGORITHM)
-		int status = SetPicomotorLocation(0, REGISTER[memory_PICO0_LOCATION], data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==184){ // INITIALIZE
-		int status = InitializePicomotor(0, data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==185){ // CALIBRATE
-		float mean, std;
-		int status = CalibratePicomotor(0, data, &mean, &std);
-		if(!status){
-			REGISTER[memory_PICO0_MEAN] =  (long)(mean*1000000);
-			REGISTER[memory_PICO0_STD] =  (long)(  std*1000000);
-		}
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==186){ // MEASURE ENCODER STATE
-		int state;
-		int status = GetEncoderState(0, &state);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RIGHT PICOMOTOR
-	else if(command==191){ // MOVE BY TICKS
-		int status = MovePicomotor(1,data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==192){ // MOVE BY INTERVALS
-		int MovedIntervals, MovedTicks;
-		int status = MoveIntervals(1, data, &MovedIntervals, &MovedTicks);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==193){ // MOVE BY NM (THROUGH ALGORITHM)
-		int status = SetPicomotorLocation(1, REGISTER[memory_PICO1_LOCATION], data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==194){ // INITIALIZE
-		int status = InitializePicomotor(1, data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==195){ // CALIBRATE
-		float mean, std;
-		int status = CalibratePicomotor(1, data, &mean, &std);
-		if(!status){
-			REGISTER[memory_PICO1_MEAN] =  (long)(mean*1000000);
-			REGISTER[memory_PICO1_STD] =  (long)(std*1000000);
-		}
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==196){ // MEASURE ENCODER STATE
-		int state;
-		int status = GetEncoderState(1, &state);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// BOTTOM PICOMOTOR
-	else if(command==201){ // MOVE BY TICKS
-		int status = MovePicomotor(2,data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==202){ // MOVE BY INTERVALS
-		int MovedIntervals, MovedTicks;
-		int status = MoveIntervals(2, data, &MovedIntervals, &MovedTicks);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==203){ // MOVE BY NM (THROUGH ALGORITHM)
-		int status = SetPicomotorLocation(2, REGISTER[memory_PICO2_LOCATION], data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==204){ // INITIALIZE
-		int status = InitializePicomotor(2, data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==205){ // CALIBRATE
-		float mean, std;
-		int status = CalibratePicomotor(2, data, &mean, &std);
-		if(!status) {
-			REGISTER[memory_PICO2_MEAN] = (long)(mean*1000000);
-			REGISTER[memory_PICO2_STD] =  (long)(std*1000000);
-		}
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	else if(command==206){ // MEASURE ENCODER STATE
-		int state;
-		int status = GetEncoderState(2, &state);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE MUX
-	else if (command==210){
-		int status = MULTIPLEXER_INIT(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// TURN CHANNEL ON
-	else if (command==211){ 
-		int status = ChannelOn(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	// TURN CHANNEL OFF
-	else if (command==212){ 
-		int status = ChannelOff(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE ELECTRODE ALGORITHM
-	else if (command==213){
-		int status = ELECTRODE_ACTUATION_INIT();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// ACTUATE ELECTRODE
-	else if (command==214){
-		int status = ActuateElectode(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE THERMO-SENSORS
-	else if (command==220){
-		int status = TEMP_SENSORS_INIT();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// MEASURE TEMP FROM MCP9801
-	else if(command==221){
-		int16_t temp;
-		int status = GetTemperatureMCP9801(data, &temp);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// MEASURE TEMP FROM TMP006
-	else if(command==222){
-		int16_t temp;
-		int status = GetTemperatureTMP006(data, &temp);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// RE-INITIALIZE WATCHDOG TIMER
-	else if (command==230){
-		int status = WATCHDOG_INIT();
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// DISABLE WATCHDOG TIMER
-	else if (command==231){
-		DisableWatchdogTimer();
-		int error = SendFeedback(port,command,0);
-		if(error) return error;
-	}
-	
-	/*--------------------------------------------------
-                       SPECIAL COMMANDS
-	--------------------------------------------------*/
-	// command = 240-255
-
-	// SAVE MEMORY
-	else if(command==240){
-		int status = SaveRegister(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-
-	// LOAD MEMORY
-	else if(command==241){
-		int status = LoadRegister(data);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// WRITE CODE TO EEPROM
-	else if(command==245){
-		uint16_t length = data & 0xffff;
-		uint32_t eeprom_index = data >> 16;
-		uint8_t buffer[length + 2];
-		buffer[0] = length >> 8;
-		buffer[1] = length;
-		int error = SendFeedback(port,command,0);
-		if(error) return error;	
 		
-		int status = LoadMessage(port, &(buffer[2]), length,(long)10000);
-		if(status==0) status = WriteinEEPROM(eeprom_index, buffer, length);
-		error = SendFeedback(port,command,status);
-		if(error) return error;
+		if( done ) break; // adding has finished, found a blank spot, exit here.
+		idx++; // else check the next available spot in task list
 	}
-	
-	// GET SIZE OF CODE IN EEPROM
-	else if(command==246){
-		int length;
-		int status = GetSizeofCode(data, &length);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	// READ BYTE OF CODE IN EEPROM
-	else if(command==247){
-		uint8_t byte;
-		int status = ReadCodeinEEPROM(data>>16, data & 0xffff, &byte);
-		int error = SendFeedback(port,command,status);
-		if(error) return error;
-	}
-	
-	//PING
-	else if(command==255){
-		int error = SendFeedback(port,command,data);
-		if(error) return error;
-	}
-	
-	// WRONG COMMAND
-	else{
-		int error = SendFeedback(port,254,command);
-		if(error) return error;	
-	}
-	
-	return OK;
+
 }
 
-ISR(WDT_vect){
-	// Interrupt before power-up from watchdog
-	// Saves the register
-	SaveRegister(0);
+// remove task from task list. Stops the task immediately.
+// note STOPPED is equivalent to removing a task
+void deleteTask(uint8_t id)
+{
+	// Prevent 
+	
+	for(uint8_t i=0;i<MAX_TASKS;i++)
+	{
+		if( task_list[i].id == id )
+		{
+			task_list[i].status = STOPPED;	// So this idx can be used as plugging a task.		
+			break;
+		}
+	}
 }
 
+// gets the task status
+int getTaskStatus(uint8_t id) // command is id
+{
+	for(uint8_t i=0;i<MAX_TASKS;i++)
+	{
+		if( task_list[i].id == id )
+		return task_list[i].status;	
+	}
+	// Send feedback in ParseCommand_New
+	// return ERROR; // if id is invalid
+}
+
+// Generates a "tick" with system timer
+// each tick 100ms (0.1s) apart
+// Will be disturbed by: 
+// 1) UART interrupt; but won't be disturbed by watchdog timer (run in parallel independently)
+ISR(TIMER0_OVF_vect)
+{
+	count ++;
+	if( count == 392 )
+	{
+		count = 0;
+		// cycle through available tasks and deduct 1 from delay every 0.1s
+		for(uint8_t i=0;i<MAX_TASKS;i++)
+		{
+			if( (task_list[i].status == RUNNABLE) && (task_list[i].delay>0) ) 
+			task_list[i].delay--; // If delay is 0, then task is ready to run
+		// Important 
+			
+		}
+	}
+}
+
+// Parse command
+void ParseCommand_New(int port){ // This function update the task list, !tasks are not run here!; detailed operation done in task functions upon get called (Loc_1).
+
+	uint8_t command;
+	uint8_t ActionCode;
+	uint8_t Period;
+	int32_t data;
+	uint16_t checksum;
+	uint8_t TaskStatus;
+	
+	//--------------------------------------------------
+	//                 MESSAGE CHECK
+	//--------------------------------------------------
+	CheckMessage(port, &command, &ActionCode, &Period, &data, &checksum); // in drivers.h, decode the incoming message.
+	
+	switch(command) { // Command no. is task no. in scheduler
+		
+		/*--------------------------------------------------
+						  Read register
+		--------------------------------------------------*/
+		case 150:
+		// Instead of creating a task for this functionality, simply do it as soon as it received the command, non repeatable.
+		SendFeedback(port, command, ActionCode, Period, REGISTER[data]);
+
+		/*--------------------------------------------------
+						Blink LED
+		--------------------------------------------------*/
+		case 151:
+		
+		// Send command back to confirm data has been successfully parsed
+		if(ActionCode == Delete_Task){
+			deleteTask(command);
+			SendFeedback(port, command, ActionCode, Period, data);
+		}
+		else if(ActionCode == Add_Task){
+			addTask(command, Task151, Period, data);
+			SendFeedback(port, command, ActionCode, Period, data);
+		} 
+		else if(ActionCode == Get_Status){
+			TaskStatus = getTaskStatus(command);
+			SendFeedback(port, command, ActionCode, Period, TaskStatus); // need to include status of task in feedback message.
+		}		
+		break;
+		
+		
+		default:
+		// wrong command (id invalid), send feedback.
+		SendFeedback(port, command, ActionCode, Period, data);
+		break;
+		
+	}
+
+}
+
+// Core of the scheduler: dispatches tasks when they are ready to run.
+// Notice: will be constantly interrupted by tick function
+// This function runs at system frequency
+void dispatchTasks(void)
+{
+	
+	int port; 
+	int repeatability;
+	if ( (port = IsCommandWaiting()) ){ 
+		ParseCommand_New(port);
+	} // Note: IsCommandWaiting will disable interrupt every time called. So system timer will be stopped for a tiny amount of time (time required to run the function), happens at system frequency; the system timer will pick up the value where it's stopped then continues running.
+	// During long task functions, even if new message comes in, will not be accepted and parsed if code is 'stuck' at Loc_1.
+	
+	for(uint8_t i=0;i<MAX_TASKS;i++)
+	{
+
+		if( !task_list[i].delay &&
+		task_list[i].status == RUNNABLE )
+		{
+			
+			task_list[i].status = RUNNING; // Change status to running so ISR wont modify the tasks status until the function finishes.
+			
+			repeatability = (*task_list[i].task)(task_list[i].data);  // Loc_1
+			// !!! Important. Running the task function. This will take as long as it needs. But if this function takes too long to run, nothing will happen. 
+
+			// reset the delay
+			task_list[i].delay = task_list[i].period;
+
+			// Depends on the task type, keep the current task runnable or remove it from list
+			if (repeatability)
+			{
+				task_list[i].status = RUNNABLE;
+			}
+			else
+				task_list[i].status = STOPPED;		
+			
+		}
+	}
+}
+
+// task function for test
+uint8_t Task151(uint32_t data) // not using data for now
+{
+			
+	//LED ON
+	PORTD &=~(1<<PORTD7);
+	//~0.1s delay
+	_delay_ms(500);
+	PORTD|=(1<<PORTD7);
+
+	// send feedback to console.
+
+	// This task is repeatable
+	return REPEATABLE;
+
+}
+
+/**********************************************************************/
+// Main loop
+/**********************************************************************/
+// main function
 int main(void)
-{	
+{
+	cli(); // Disable interrupts
+	
 	LoadRegister(0);
 
-	USART0_INIT(9600);
-	USART1_INIT(9600);
-    SPI_INIT(4000000);
+	UART0_INIT(9600);
+	UART1_INIT(9600);
+	SPI_INIT(2000000);
 	I2C_INIT(200000);
+	ADC_INIT(100000);
 	
 	COMMUNICATION_INIT(1000);
 	POWER_INIT();
-    //PICOMOTORS_INIT();
+	PICOMOTORS_INIT();
 	MULTIPLEXER_INIT(0);
 	MULTIPLEXER_INIT(1);
 	SEP_DEV_INIT();
-	TEMP_SENSORS_INIT();
+	TEMP_SENSORS_INIT(0);
+	// If one of these fail, go into watchdog reset mode
 	
-	//PICOMOTOR_ESTIMATION_INIT(100);
-	ELECTRODE_ACTUATION_INIT();
 	
-	int ch = 0;
-	int status;
-	int port;
+	/* Perform system initialization, including initialization of WDT */
+	// Timer0 control register: use 1/8 of system clock frequency
+	TCCR0B = 0x02; 
+	// Important: 8-bit counter Counter overflow at 255 counts
 	
-    while (1)
-    {	
-		// Receive telecommand (if any)	
-		if((port=IsCommandWaiting())){
-				status = SaveCommand(port);
-				if(status == 0) ParseCommand(port);
-		}
-		/*
-		// Actuate the electrode
-		if(REGISTER[memory_ELECTRODE1 + ch]){
-			status = ActuateElectode(ch);
-			if(status) REGISTER[memory_ELECTRODE1 + ch] = 0; // If problem with electrode, turn it off
-		}
-		
-		// Update electrode index
-		if (++ch >= N_electrodes){
-			ch = 0;	
-		}
-			
-			*/	
-    }
+	// timer initial value -> necessary
+	TCNT0 = 0;
+	// enable Timer0 Overflow interrupt
+	TIMSK0 = _BV(TOIE0);
+	// enable Timer0 output compare match interrupt
+	//TIMSK0 = _BV(OCIE0A); OCR0A = (1 << 7);
+	// set PORTD bit0 and bit1 as outputs to light up LED's
+	DDRD = _BV(PORTD7);
+
+	// Initialize scheduler: set up the task list
+	initScheduler();
+
+	// task1 runs every 1 second
+	addTask(151, Task151, 10, 0);
+
+	// Enable all interrupts. Attention!
+	//1. During parsing command interrupt will be disabled
+	//2. UART interrupt will disturb the system timer (or not?)
+	sei(); // Enable global interrupt
+	for(;;)
+		dispatchTasks();
+	
+	return 0; // will never reach here
 }
+
+// Doomed if reach here

@@ -16,17 +16,24 @@
 #ifndef OK
 #define OK 0
 #endif
-
-/*--------------------------------------------------
-                PICOMOTORS ESTIMATION
---------------------------------------------------*/
+//--------------------------------------------------
+//                PICOMOTORS ESTIMATION
+//--------------------------------------------------
 // PARAMETERS
-int PosFineStepBoundaries[5] = {0,29,57,85,113}; // Only low bound of intervals
-int NegFineStepBoundaries[2] = {139,170}; // Only low bound of intervals
+uint16_t PosFineStepBoundaries[5] = {0,29,57,85,113}; // Only low bound of intervals
+uint16_t NegFineStepBoundaries[2] = {139,170}; // Only low bound of intervals
 
 // ERRORS ENUM
 enum picomotor_algorithm {
-	CURRENT_STATE_OOB = 201, 
+	PICOMOTOR_ESTIMATION_INIT_CODE = 201,
+	PICOMOTOR_ESTIMATION_ENCODERSTATEMONITOR_CODE,
+	PICOMOTOR_ESTIMATION_NUMTICKSCALC_CODE,
+	PICOMOTOR_ESTIMATION_MOVEINTERVALS_CODE,
+	PICOMOTOR_ESTIMATION_INITIALIZEPICO_CODE,
+	PICOMOTOR_ESTIMATION_CALIBRATEPICO_CODE,
+	PICOMOTOR_ESTIMATION_SETPICOLOCATION_CODE,
+	
+	CURRENT_STATE_OOB, 
 	PREVIOUS_STATE_OOB,
 	INCORRECT_STATE_CHANGE,
 	STATE_MONITOR_CRITICAL,
@@ -39,8 +46,10 @@ enum picomotor_algorithm {
 	};
 	
 // FUNCTIONS
-int PICOMOTOR_ESTIMATION_INIT(int max_ticks)
+int PICOMOTOR_ESTIMATION_INIT(uint32_t max_ticks)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_INIT_CODE;
+	
 	// Set size of encoder gaps
 	REGISTER[memory_ENCODER0_INTERVAL_SIZE] = 212; //nm
 	REGISTER[memory_ENCODER1_INTERVAL_SIZE] = 212; //nm
@@ -55,8 +64,10 @@ int PICOMOTOR_ESTIMATION_INIT(int max_ticks)
 	
 	return OK;
 }
-int EncoderStateMonitor(int current_state, int prev_state, int* update)
+int EncoderStateMonitor(uint8_t current_state, uint8_t prev_state, uint8_t* update)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_ENCODERSTATEMONITOR_CODE;
+	
 	// current_state = state00 or state10 or state11 or state01
 	// prev_state = state00 or state10 or state11 or state01
 	// OUTPUT = update = -1 (current state is one step down) or 0 (no change of state) or 1 (current state is one step up)
@@ -78,22 +89,24 @@ int EncoderStateMonitor(int current_state, int prev_state, int* update)
 	
 	return STATE_MONITOR_CRITICAL;
 }
-int NumTicksCalc(int index, int currentLocation, int desiredLocation, int* CoarseIntervals, int* FineSteps)
+int NumTicksCalc(int index, int32_t currentLocation, int32_t desiredLocation, int32_t* CoarseIntervals, int32_t* FineSteps)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_NUMTICKSCALC_CODE;
+	
 	// desiredLocation in nm (0 assumed to be the calibrated 0 at an interval limit)
 	// CorseIntervals = number of encoder intervals to move the picomotor (signed int)
 	// FineSteps = number of ticks to move the picomotor after the Coarse adjustment (signed int)
 	
-	int IntervalSize = REGISTER[memory_ENCODER0_INTERVAL_SIZE + index];
+	uint32_t IntervalSize = REGISTER[memory_ENCODER0_INTERVAL_SIZE + index];
 	
 	// Find which encoder interval is the desiredLocation
-	int desiredInterval = (int)desiredLocation/IntervalSize - (desiredLocation<0);
+	int32_t desiredInterval = (int32_t)desiredLocation/IntervalSize - (desiredLocation<0);
 	
 	// Find where within this previous interval is the desiredLocation
-	int desiredRemainder = desiredLocation % IntervalSize + IntervalSize*(desiredLocation<0);
+	int32_t desiredRemainder = desiredLocation % IntervalSize + IntervalSize*(desiredLocation<0);
 	
 	// Find current encoder interval
-	int currentInterval = (int)currentLocation/IntervalSize;
+	int32_t currentInterval = (int32_t)currentLocation/IntervalSize;
 
 	// Calculate the CoarseIntervals from the currentInterval and the desiredRemainder
 	// Calculate FineSteps from desiredRemainder
@@ -103,10 +116,10 @@ int NumTicksCalc(int index, int currentLocation, int desiredLocation, int* Coars
 		*CoarseIntervals = desiredInterval - currentInterval - 1;
 		
 		// Size of PosFineStepBoundaries
-		int sizeP = sizeof(PosFineStepBoundaries)/sizeof(PosFineStepBoundaries[0]);
+		uint8_t sizeP = sizeof(PosFineStepBoundaries)/sizeof(PosFineStepBoundaries[0]);
 		
 		// Compare the remainder to boundaries
-		for (int II=sizeP-1; II >= 0; II--)
+		for (uint8_t II=sizeP-1; II >= 0; II--)
 		{
 			if(desiredRemainder >= PosFineStepBoundaries[II])
 			{
@@ -125,10 +138,10 @@ int NumTicksCalc(int index, int currentLocation, int desiredLocation, int* Coars
 		*CoarseIntervals = desiredInterval - currentInterval + 1;
 		
 		// Size of NegFineStepBoundaries
-		int sizeN = sizeof(NegFineStepBoundaries)/sizeof(NegFineStepBoundaries[0]);
+		uint8_t sizeN = sizeof(NegFineStepBoundaries)/sizeof(NegFineStepBoundaries[0]);
 		
 		// Compare the remainder to boundaries
-		for (int II=sizeN-1; II >= 0; II--)
+		for (uint8_t II=sizeN-1; II >= 0; II--)
 		{
 			if(desiredRemainder >= NegFineStepBoundaries[II])
 			{
@@ -146,8 +159,10 @@ int NumTicksCalc(int index, int currentLocation, int desiredLocation, int* Coars
 	return OK;	
 	
 }
-int MoveIntervals(int index, int CoarseIntervals, int* MovedIntervals, int* MovedTicks)
+int MoveIntervals(int index, int32_t CoarseIntervals, int32_t* MovedIntervals, int32_t* MovedTicks)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_MOVEINTERVALS_CODE;
+	
 	// index = 0 or 1 or 2 (index of picomotor)
 	// CoarseIntervals = number of encoder intervals to move the picomotor (signed int)
 	// MovedIntervals = OUTPUT actual number of intervals moved by the function. Should be equal to CoarseIntervals if everything went fine
@@ -156,26 +171,26 @@ int MoveIntervals(int index, int CoarseIntervals, int* MovedIntervals, int* Move
 	int error = 0;
 	
 	// Get the direction
-	int dir;
+	int8_t dir;
 	if(CoarseIntervals > 0) dir = 1;
 	else if(CoarseIntervals < 0) dir = -1;
 	else return OK; //No need to move
 	
 	// Get current state of encoders
-	int prev_state, current_state;
+	uint8_t prev_state, current_state;
 	error = GetEncoderState(index, &current_state);
 	if(error) return error;
 	
 	// Loop
 	*MovedIntervals = 0;
 	*MovedTicks = 0;
-	int update = 0;
-	for (int II=0; II < abs(CoarseIntervals); II++)
+	uint8_t update = 0;
+	for (uint32_t II=0; II < abs(CoarseIntervals); II++)
 	{
 		// Update previous state for next interval
 		prev_state = current_state; 
 		// Count the number of ticks
-		int ticks_count=0;
+		uint32_t ticks_count=0;
 		
 		// Actuate while a new state is not reached
 		do
@@ -208,6 +223,8 @@ int MoveIntervals(int index, int CoarseIntervals, int* MovedIntervals, int* Move
 }
 int InitializePicomotor(int index, bool limit)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_INITIALIZEPICO_CODE;
+	
 	// index = 0 or 1 or 2 (index of picomotor)
 	// limit = 0 (initialize to closest lower encoder inteval switch) or 1 (initialize to soft switch)
 	
@@ -215,8 +232,10 @@ int InitializePicomotor(int index, bool limit)
 	
 	return OK;
 }
-int CalibratePicomotor(int index, signed int intervals, float* mean, float* std)
+int CalibratePicomotor(int index, int16_t intervals, float* mean, float* std)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_CALIBRATEPICO_CODE;
+	
 	// index = 0 or 1 or 2 (index of picomotor)
 	// intervals = number of intervals to use for calibration (the more the better/the longer)
 	// mean = OUTPUT mean of an actuation tick (this value converges quickly to its true value. No need for a large "intervals" input)
@@ -225,17 +244,17 @@ int CalibratePicomotor(int index, signed int intervals, float* mean, float* std)
 	int error;
 	
 	// The calculation of the mean and standard deviation of one actuation is calculated from aggregating the results of "sqrt(intervals)" intervals
-	int dir; 
+	int8_t dir; 
 	if(intervals>=0) dir = 1;
 	if(intervals<0) dir = -1;
 	
 	// To calculate the mean and std, we need the sum and the sum of squares
-	long sum_ticks = 0;
-	long sum_ticks_squared = 0;
+	uint32_t sum_ticks = 0;
+	uint32_t sum_ticks_squared = 0;
 	
 	// Get data
-	int MovedIntervals, MovedTicks;
-	for(int II=0; II<abs(intervals); II++)
+	int32_t MovedIntervals, MovedTicks;
+	for(int16_t II=0; II<abs(intervals); II++)
 	{
 		// Move the desired amount of intervals
 		error = MoveIntervals(index, dir, &MovedIntervals, &MovedTicks);
@@ -251,8 +270,10 @@ int CalibratePicomotor(int index, signed int intervals, float* mean, float* std)
 		
 	return OK;
 }
-int SetPicomotorLocation(int index, int currentLocation, int desiredLocation)
+int SetPicomotorLocation(int index, int32_t currentLocation, int32_t desiredLocation)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | PICOMOTOR_ESTIMATION_SETPICOLOCATION_CODE;
+	
 	// INPUT index = 0 or 1 or 2 (index of picomotor)
 	// INPUT currentLocation in nm (0 assumed to be the calibrated 0 at an interval limit)
 	// INPUT desiredLocation in nm (0 assumed to be the calibrated 0 at an interval limit)
@@ -260,12 +281,12 @@ int SetPicomotorLocation(int index, int currentLocation, int desiredLocation)
 	int error = 0;
 	
 	// Get the number of Coarse intervals to go and the fine steps
-	int CoarseIntervals, FineSteps;
+	int32_t CoarseIntervals, FineSteps;
 	error = NumTicksCalc(index, currentLocation,desiredLocation,&CoarseIntervals,&FineSteps);
 	if(error) return error;
 	
 	// Move the coarse intervals
-	int MovedIntervals, MovedTicks;
+	int32_t MovedIntervals, MovedTicks;
 	error = MoveIntervals(index, CoarseIntervals, &MovedIntervals, &MovedTicks);
 	if(error) return error;
 	
@@ -295,112 +316,86 @@ int SetPicomotorLocation(int index, int currentLocation, int desiredLocation)
 	return OK;
 }
 
-
-/*--------------------------------------------------
-                ELECTRODE ACTUATION
---------------------------------------------------*/
+//--------------------------------------------------
+//                ELECTRODE ACTUATION
+//--------------------------------------------------
 #define N_electrodes 41 //Number of electrodes
-int ActuateElectode(int channel);
+int Actuation_ON = 0;
+int ActuateElectrode(int channel);
 
-int ELECTRODE_ACTUATION_INIT(void)
+enum electrode_algorithm {
+	ELECTRODE_ACTUATION_INIT_CODE = 221,
+	ELECTRODE_ACTUATION_ACTUATE_CODE
+};
+
+int ELECTRODE_ACTUATION_INIT(uint8_t measure_count)
 {
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | ELECTRODE_ACTUATION_INIT_CODE;
+	
 	// Set times
-	REGISTER[memory_HV_TIMER] = 1000; // Time for HV to stabilize [ms]
+	REGISTER[memory_HV_TIMER] = 15; // Time for HV to stabilize [ms]
 	
 	// Set maximum voltage
 	REGISTER[memory_ELECTRODE_LIMIT_V] = 8088; // Limit (plus/minus) from bias
+	
+	// Set step increment voltage
+	REGISTER[memory_HV_STEP] = 337; // 10V steps
+	
+	// Set bias voltage
+	REGISTER[memory_HV_BIAS] = 8191; // 8191 = +240V Bias
 		
 	// Turn on HV voltage
-	int error = ActivateHV();
+	int error = ActivateHV(measure_count);
 	if(error) return error;
+	
+	long volt;
 	
 	// Initialize voltages for all electrodes (+ delays of 10ms)
 	int N_increments = floor((double)(0x3fff - REGISTER[memory_HV_BIAS])/(double)REGISTER[memory_HV_STEP]);
 	for(int II=0; II<N_increments; II++){
-		error = SetBias(0x3fff - II*REGISTER[memory_HV_STEP]);
+		
+		volt = 0x3fff - II*REGISTER[memory_HV_STEP];
+		
+		error = SetBias(volt);
 		if(error) return error;
 		
-		// TODO: Delete next 3 lines
-		error = SetVoltage(0x3fff - II*REGISTER[memory_HV_STEP]);
+		error = SetVoltage(volt);
 		if(error) return error;
+		
 		_delay_ms(REGISTER[memory_HV_TIMER]);
 		
 		for (int ch=0; ch < N_electrodes; ch++){
-			REGISTER[memory_ELECTRODE1+ch] = ((long)10<<24) | ((long)10<<16) | ((0x3fff - II*REGISTER[memory_HV_STEP]) & 0xffff);
-			//error = ActuateElectode(ch);
-			//if(error) return error;
+			REGISTER[memory_ELECTRODE1+ch] = ((long)10<<24) | ((long)10<<16) | (volt & 0xffff);
+			error = ActuateElectrode(ch); // Should go very quickly since the voltage is already set
 		}
+		if(error) return error;
 	}
+	
 	error = SetBias(REGISTER[memory_HV_BIAS]);
 	if(error) return error;
 	
-	// TODO: Delete next 3 lines
 	error = SetVoltage(REGISTER[memory_HV_BIAS]);
 	if(error) return error;
+	
 	_delay_ms(REGISTER[memory_HV_TIMER]);
 	
 	for (int ch=0; ch < N_electrodes; ch++){
 		REGISTER[memory_ELECTRODE1+ch] = ((long)10<<24) | ((long)10<<16) | (REGISTER[memory_HV_BIAS] & 0xffff);
-		//error = ActuateElectode(ch);
-		//if(error) return error;
+		error = ActuateElectrode(ch); // Should go very quickly since the voltage is already set
 	}
+	if(error) return error;
+	
+	Actuation_ON = 1;
 	
 	return OK;
 }
-int SortVoltages(unsigned int *voltages,unsigned int *sorted_voltages,unsigned int *sorted_channels, int number_channels)
-{
-	int II;
-	
-	unsigned int *temp_voltages = voltages;
-	int temp_channels[number_channels];
-	for(II = 0; II < number_channels; II++)
-	{
-		temp_channels[II] = II;
-	}
-	unsigned short volt;
-	short index;
-	short ch;
-	
-	// Sort voltages in ascending order and channels accordingly
-	for(II = 0; II < number_channels-1; II++)
-	{
-		volt = temp_voltages[II];
-		index = II;
-		for(int III = II+1; III < number_channels; III++)
-		{
-			if(temp_voltages[III] < volt)
-			{
-				volt = temp_voltages[III];
-				index = III;
-			}
-		}
-		temp_voltages[index] = temp_voltages[II];
-		temp_voltages[II] = volt;
-		ch = temp_channels[index];
-		temp_channels[index] = temp_channels[II];
-		temp_channels[II] = ch;
-	}
-
-	// Organize voltage in a triangle fashion
-	for(II = 0; II < number_channels; II+=2)
-	{
-		sorted_voltages[II/2] = temp_voltages[II];
-		sorted_channels[II/2] = temp_channels[II];
-	}
-	for(II = 1; II < number_channels; II+=2)
-	{
-		sorted_voltages[number_channels-(II+1)/2] = temp_voltages[II];
-		sorted_channels[number_channels-(II+1)/2] = temp_channels[II];
-	}
-	
-	
-	
-	return OK;
-}
-int ActuateElectode(int channel){
-	int status;
+int ActuateElectrode(int channel){
+	REGISTER[memory_CURRENT_FUNCTION] = (REGISTER[memory_CURRENT_FUNCTION] << 8) | ELECTRODE_ACTUATION_ACTUATE_CODE;
 	
 	unsigned int memory_address = memory_ELECTRODE1 + channel;
+	if ( REGISTER[memory_address] == 0 ) return OK;
+	
+	int status;
 	
 	// 1. Check voltage
 	uint16_t limit = (uint16_t)REGISTER[memory_ELECTRODE_LIMIT_V];
@@ -418,25 +413,39 @@ int ActuateElectode(int channel){
 	// 2. Set desired voltage
 	if (voltage != REGISTER[memory_HV]){
 		status = SetVoltage(voltage);  // Set DAC value
-		if(status) return status;
+		if(status) {
+			REGISTER[memory_ELECTRODE_ERROR] = (REGISTER[memory_ELECTRODE_ERROR] << 8) | status;
+			return status;
+		}
 		_delay_ms(REGISTER[memory_HV_TIMER]);
 	}
 	
 	// 3. Turn channel on
 	status = ChannelOn(channel);  // Start charging channel
-	if(status) return status;
+	if(status) {
+		REGISTER[memory_ELECTRODE_ERROR] = (REGISTER[memory_ELECTRODE_ERROR] << 8) | status;
+		return status;
+	}
 	
 	// 4. Charge electrode
 	_delay_ms((REGISTER[memory_address] >> 24) & 0xff);
 	
 	// 5. Turn channel off
 	status = ChannelOff(channel);
-	if(status) return status;
+	if(status) {
+		REGISTER[memory_ELECTRODE_ERROR] = (REGISTER[memory_ELECTRODE_ERROR] << 8) | status;
+		return status;
+	}
 	
 	// 6. Update timer in electrode data
 	REGISTER[memory_address] = ((REGISTER[memory_address] & 0xff0000) << 8) | (REGISTER[memory_address] & 0xffffff);
 	
 	return OK;
 }
+
+//--------------------------------------------------
+//                COMMAND PARSING
+//--------------------------------------------------
+ 
 
 #endif /* ALGORITHMS_H_ */
